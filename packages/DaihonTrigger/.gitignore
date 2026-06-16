@@ -2,3 +2,7 @@ node_modules/
 .DS_Store
 .tmp/
 crash.log
+
+# Local data
+project_data.json
+public/assets/

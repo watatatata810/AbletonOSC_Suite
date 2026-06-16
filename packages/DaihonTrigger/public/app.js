@@ -5,6 +5,7 @@ const socket = io();
 let pdfDoc = null;
 let pagesData = {};
 let fabricCanvases = {}; // pageNum(1-indexed) -> fabric.Canvas
+let currentPdfName = 'sample.pdf'; // サーバーから受け取るアクティブなPDF名
 const scale = 1.5;
 
 // DOM
@@ -95,7 +96,7 @@ const saveCurrentPage = (pageNum) => {
     if (!canvas || canvas.isRestoring) return;
     const fabricData = canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum']);
     pagesData[pageNum] = fabricData;
-    socket.emit('save_data', { pageNum: pageNum, fabricData: fabricData });
+    socket.emit('save_data', { pdfName: currentPdfName, pageNum: pageNum, fabricData: fabricData });
 };
 
 // --- PDF連続描画とキャンバス初期化 ---
@@ -547,17 +548,155 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
 };
 
 // --- 初期化フロー ---
-const pdfUrl = 'pdfs/test.pdf';
 
 socket.emit('load_all_data');
 socket.on('all_data_loaded', (data) => {
-    pagesData = data || {};
+    currentPdfName = data.activePdfName || 'sample.pdf';
+    pagesData = data.pagesData || {};
+    
+    const pdfUrl = `/assets/${currentPdfName}?t=` + Date.now(); // キャッシュ回避
     
     pdfjsLib.getDocument(pdfUrl).promise.then((pdfDoc_) => {
         pdfDoc = pdfDoc_;
         renderAllPages();
     }).catch(err => {
         console.error('PDF Load Error:', err);
-        zoomWrapper.innerHTML = `<h2 style="color:red">PDFの読み込みに失敗しました (${pdfUrl})</h2>`;
+        zoomWrapper.innerHTML = `
+            <div style="color:white; padding: 50px; text-align: center; margin-top: 1000px; transform: scale(3);">
+                <h2>PDFがまだアップロードされていません</h2>
+                <p>右上の「📄 PDF変更」ボタンから台本PDFをアップロードしてください。</p>
+            </div>
+        `;
     });
 });
+
+// --- PDFアップロード機能 ---
+const btnUpload = document.getElementById('btn-upload-pdf');
+const inputUpload = document.getElementById('pdf-upload-input');
+
+if (btnUpload && inputUpload) {
+    btnUpload.addEventListener('click', () => {
+        inputUpload.click();
+    });
+
+    inputUpload.addEventListener('change', async (e) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+        
+        const file = e.target.files[0];
+        const formData = new FormData();
+        formData.append('pdf', file);
+        
+        btnUpload.textContent = 'アップロード中...';
+        btnUpload.disabled = true;
+
+        try {
+            const res = await fetch('/upload-pdf', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (!data.success) {
+                alert('アップロードに失敗しました: ' + data.error);
+                btnUpload.textContent = '📄 PDF変更';
+                btnUpload.disabled = false;
+            }
+            // 成功時は socket.on('pdf_updated') によって全クライアントが一斉に自動リロードされる
+        } catch (err) {
+            console.error('Upload error:', err);
+            alert('アップロード中にエラーが発生しました');
+            btnUpload.textContent = '📄 PDF変更';
+            btnUpload.disabled = false;
+        } finally {
+            inputUpload.value = ''; // 連続アップロード可能にするためリセット
+        }
+    });
+}
+
+// 他の端末（または自身）でPDFがアップロード・更新された場合、自動で画面をリロードする
+socket.on('pdf_updated', () => {
+    window.location.reload();
+});
+
+// --- PDF書き出し機能 ---
+const btnExport = document.getElementById('btn-export-pdf');
+if (btnExport) {
+    btnExport.addEventListener('click', async () => {
+        if (!pdfDoc || !currentPdfName) {
+            alert('PDFが読み込まれていません');
+            return;
+        }
+        
+        btnExport.textContent = '書き出し中...';
+        btnExport.disabled = true;
+        
+        try {
+            // 1. 元のPDFをダウンロードして pdf-lib でロード
+            const pdfUrl = `/assets/${currentPdfName}?t=${Date.now()}`;
+            const existingPdfBytes = await fetch(pdfUrl).then(res => res.arrayBuffer());
+            
+            const { PDFDocument } = PDFLib;
+            const pdfDocLib = await PDFDocument.load(existingPdfBytes);
+            const pages = pdfDocLib.getPages();
+            
+            // 2. 各ページのFabric上のオブジェクト（手書き・ボタン）を透過PNGとして埋め込む
+            for (let num = 1; num <= pages.length; num++) {
+                const page = pages[num - 1];
+                const pageHeight = page.getHeight();
+                const canvas = fabricCanvases[num];
+                if (!canvas) continue;
+                
+                const objects = canvas.getObjects();
+                for (const obj of objects) {
+                    // Fabricの描画スケール（1.5）を元のPDFサイズに戻す係数
+                    const pdfScale = 1 / scale; 
+                    
+                    // オブジェクト単体を高画質の背景透過PNGとして書き出し
+                    const dataUrl = obj.toDataURL({ format: 'png', multiplier: 3 });
+                    const imgBytes = await fetch(dataUrl).then(res => res.arrayBuffer());
+                    const img = await pdfDocLib.embedPng(imgBytes);
+                    
+                    const w = obj.getScaledWidth() * pdfScale;
+                    const h = obj.getScaledHeight() * pdfScale;
+                    
+                    let cx = obj.left * pdfScale;
+                    let cy = obj.top * pdfScale;
+                    
+                    // originが 'left' / 'top' の場合、中心座標に補正する（手書きパス等）
+                    if (obj.originX === 'left') cx += (w / 2);
+                    if (obj.originY === 'top') cy += (h / 2);
+                    
+                    // PDFは左下が原点 (0,0) なのでY座標を反転。drawImageの起点は左下
+                    const pdfX = cx - (w / 2);
+                    const pdfY = pageHeight - cy - (h / 2);
+                    
+                    page.drawImage(img, { 
+                        x: pdfX, 
+                        y: pdfY, 
+                        width: w, 
+                        height: h 
+                    });
+                }
+            }
+            
+            // 3. 合成したPDFをブラウザでダウンロード
+            const pdfBytes = await pdfDocLib.save();
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Exported_${currentPdfName}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+        } catch (err) {
+            console.error('PDF Export Error:', err);
+            alert('PDFの書き出し中にエラーが発生しました。コンソールをご確認ください。');
+        } finally {
+            btnExport.textContent = '⬇️ PDF書き出し';
+            btnExport.disabled = false;
+        }
+    });
+}

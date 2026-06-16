@@ -5,14 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>台本ポン出しトリガー</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
 </head>
 <body>
     <div id="app-container">
         <!-- 上部ヘッダーコントロール -->
         <header id="controls">
             <span id="page-info">Total Pages: <span id="page-count">--</span></span>
-            <div id="zoom-controls">
+            <div id="zoom-controls" style="display: flex; align-items: center; gap: 15px;">
                 <span>Zoom: <span id="zoom-level">100%</span></span>
+                <button id="btn-export-pdf" class="btn-primary" style="padding: 4px 12px; font-size: 0.9em; background-color: #ff9500;">⬇️ PDF書き出し</button>
+                <button id="btn-upload-pdf" class="btn-primary" style="padding: 4px 12px; font-size: 0.9em;">📄 PDF変更</button>
+                <input type="file" id="pdf-upload-input" accept="application/pdf" class="hidden">
             </div>
         </header>
 

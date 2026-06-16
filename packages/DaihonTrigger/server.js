@@ -28,6 +28,59 @@ console.log(`[OSC] AbletonLiveからの受信用サーバーを起動しまし�
 // 静的ファイルの配信（フロントエンド用）
 app.use(express.static(path.join(__dirname, 'public')));
 
+const multer = require('multer');
+
+let activePdfName = 'sample.pdf'; // 現在アクティブなPDF名
+
+// multer の設定：アップロードされたファイルを直接 'public/assets/active.pdf' として保存・上書きする
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        // public/assets フォルダがない場合は作成する
+        const dir = path.join(__dirname, 'public', 'assets');
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        cb(null, dir);
+    },
+    filename: function (req, file, cb) {
+        // 日本語ファイル名の文字化けを防ぐため、Buffer経由でUTF-8デコード
+        const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        activePdfName = originalName;
+        cb(null, originalName);
+    }
+});
+const upload = multer({ storage: storage });
+
+// PDFアップロード用エンドポイント
+app.post('/upload-pdf', upload.single('pdf'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    console.log(`[PDF Upload] 新しいPDFがアップロードされ、アクティブになりました: ${activePdfName}`);
+    
+    // PC側の容量圧迫を防ぐため、過去の不要なPDFを削除（クリーンアップ）
+    const assetsDir = path.join(__dirname, 'public', 'assets');
+    if (fs.existsSync(assetsDir)) {
+        const files = fs.readdirSync(assetsDir);
+        for (const file of files) {
+            if (file.endsWith('.pdf') && file !== activePdfName) {
+                try {
+                    fs.unlinkSync(path.join(assetsDir, file));
+                    console.log(`[Cleanup] 古いPDFを削除しました: ${file}`);
+                } catch (e) {
+                    console.error(`[Cleanup Error] 削除失敗: ${file}`, e);
+                }
+            }
+        }
+    }
+    
+    // 全クライアントにPDFの更新を通知
+    io.emit('pdf_updated');
+    
+    res.json({ success: true, message: 'PDF uploaded successfully' });
+});
+
 // Ableton送信用クライアント
 const oscClient = new Client(ABLETON_OSC_HOST, ABLETON_OSC_PORT);
 console.log(`[OSC] Ableton LiveへのOSC送信用クライアントを準備しました (${ABLETON_OSC_HOST}:${ABLETON_OSC_PORT})`);
@@ -186,22 +239,23 @@ io.on('connection', (socket) => {
 
     // データの読み込みリクエスト
     socket.on('load_all_data', () => {
+        let currentData = {};
         if (fs.existsSync(DATA_FILE)) {
             try {
-                const data = fs.readFileSync(DATA_FILE, 'utf-8');
-                socket.emit('all_data_loaded', JSON.parse(data));
+                currentData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
             } catch (err) {
                 console.error('[File Error] データ読み込みエラー:', err);
-                socket.emit('all_data_loaded', {});
             }
-        } else {
-            socket.emit('all_data_loaded', {});
         }
+        
+        // 現在アクティブなPDFの名前と、それに紐づくデータを返す
+        const pdfData = currentData[activePdfName] || {};
+        socket.emit('all_data_loaded', { activePdfName: activePdfName, pagesData: pdfData });
     });
 
     // データ保存リクエスト
     socket.on('save_data', (payload) => {
-        // payload = { pageNum: 1, fabricData: { ... } }
+        // payload = { pdfName: 'xxx.pdf', pageNum: 1, fabricData: { ... } }
         let currentData = {};
         if (fs.existsSync(DATA_FILE)) {
             try {
@@ -209,7 +263,12 @@ io.on('connection', (socket) => {
             } catch (e) {}
         }
         
-        currentData[payload.pageNum] = payload.fabricData;
+        const pdfKey = payload.pdfName || activePdfName;
+        if (!currentData[pdfKey]) {
+            currentData[pdfKey] = {};
+        }
+        
+        currentData[pdfKey][payload.pageNum] = payload.fabricData;
         
         fs.writeFile(DATA_FILE, JSON.stringify(currentData), (err) => {
             if (err) console.error('[File Error] データ保存エラー:', err);
