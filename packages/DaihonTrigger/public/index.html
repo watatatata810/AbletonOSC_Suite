@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>台本ポン出しトリガー</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app-container">
+        <!-- 上部ヘッダーコントロール -->
+        <header id="controls">
+            <span id="page-info">Total Pages: <span id="page-count">--</span></span>
+            <div id="zoom-controls">
+                <span>Zoom: <span id="zoom-level">100%</span></span>
+            </div>
+        </header>
+
+        <!-- ツールバー（モード切替） -->
+        <div id="toolbar">
+            <button id="mode-view" class="tool-btn active">閲覧 / 操作モード</button>
+            <button id="mode-draw" class="tool-btn">手書きモード</button>
+            <button id="mode-eraser" class="tool-btn">消しゴム</button>
+            <button id="btn-undo" class="tool-btn action-btn">↩ アンドゥ</button>
+            <button id="mode-trigger" class="tool-btn">トリガー配置モード</button>
+        </div>
+
+        <!-- メインキャンバスエリア -->
+        <main id="canvas-container">
+            <!-- ピンチズームで全体を拡大縮小するためのラッパー -->
+            <div id="zoom-wrapper">
+                <!-- ここに app.js から各ページのコンテナが動的に生成されます -->
+            </div>
+        </main>
+    </div>
+
+    <!-- トリガー設定モーダル (初期非表示) -->
+    <div id="trigger-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content-large">
+            <div class="modal-header">
+                <h2>Live セッションビューから選択</h2>
+                <button id="modal-refresh" class="btn-primary">
+                    Liveから再取得
+                </button>
+            </div>
+            
+            <!-- ローディング表示 -->
+            <div id="modal-loading" class="modal-loading">
+                <div class="spinner"></div>
+                <p>Ableton Live からセッション情報を取得中...</p>
+            </div>
+            
+            <!-- グリッド表示コンテナ -->
+            <div id="modal-grid-container" class="grid-container hidden">
+                <table id="session-grid">
+                    <thead id="session-grid-head"></thead>
+                    <tbody id="session-grid-body"></tbody>
+                </table>
+            </div>
+
+            <!-- アクションボタン -->
+            <div class="modal-footer">
+                <button id="modal-cancel" class="btn-secondary">
+                    キャンセル
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 外部ライブラリ (ローカルファイル) -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="lib/pdf.min.js"></script>
+    <script src="lib/fabric.min.js"></script>
+    <script>
+        // PDF.jsのワーカーパスを設定
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+    </script>
+
+    <!-- メインロジック -->
+    <script src="app.js"></script>
+</body>
+</html>

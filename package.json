@@ -1,0 +1,18 @@
+{
+  "name": "ableton-osc-suite",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "npm-run-all --parallel start:router start:viewWaves start:DaihonTrigger",
+    "start:router": "npm run start --workspace=osc-router",
+    "start:viewWaves": "cross-env OSC_PORT=11002 PORT=3000 npm run start --workspace=viewwaves",
+    "start:DaihonTrigger": "cross-env OSC_PORT=11003 PORT=3001 npm run start --workspace=daihontrigger"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5",
+    "cross-env": "^7.0.3"
+  }
+}
