@@ -101,6 +101,8 @@ const btnCtxDelete = document.getElementById('btn-ctx-delete');
 
 let contextTargetCanvasNum = null; // 現在メニューが表示されているキャンバスの番号
 let contextMenuTimeout = null;
+let pasteTouchStartCoords = null; // タップペースト判定用座標
+let pasteTouchCanceled = false; // タップペーストのキャンセルフラグ
 
 const hideContextMenu = () => {
     contextMenu.classList.remove('visible');
@@ -675,14 +677,14 @@ const setupFabricEvents = (canvas, pageNum) => {
             if (contextTargetCanvasNum && contextTargetCanvasNum !== pageNum) {
                 hideContextMenu();
             }
+            pasteTouchCanceled = false;
             let clientX = e.clientX || 0;
             let clientY = e.clientY || 0;
             if (e.touches && e.touches.length > 0) {
                 clientX = e.touches[0].clientX;
                 clientY = e.touches[0].clientY;
             }
-            // 空白部分タップでペーストメニュー表示 (クリップボードが空なら関数内で弾かれる)
-            showContextMenu(clientX, clientY, true, pageNum);
+            pasteTouchStartCoords = { x: clientX, y: clientY };
         }
 
         // アンドゥ用に状態保存 (トリガー配置・描画・消去の直前状態)
@@ -743,6 +745,21 @@ const setupFabricEvents = (canvas, pageNum) => {
     });
 
     canvas.on('mouse:move', (options) => {
+        if (pasteTouchStartCoords) {
+            const e = options.e;
+            let currentX = e.clientX || 0;
+            let currentY = e.clientY || 0;
+            if (e.touches && e.touches.length > 0) {
+                currentX = e.touches[0].clientX;
+                currentY = e.touches[0].clientY;
+            }
+            const dx = currentX - pasteTouchStartCoords.x;
+            const dy = currentY - pasteTouchStartCoords.y;
+            if (Math.sqrt(dx * dx + dy * dy) > 10) {
+                pasteTouchCanceled = true;
+            }
+        }
+        
         if (currentMode === MODES.ERASER && isErasing) {
             // 対象を検索して消す (ポインター下のオブジェクト)
             const pointer = canvas.getPointer(options.e);
@@ -751,7 +768,17 @@ const setupFabricEvents = (canvas, pageNum) => {
         }
     });
 
-    canvas.on('mouse:up', () => {
+    canvas.on('mouse:up', (options) => {
+        // ペーストメニュー表示のタップ完了判定
+        if (currentMode === MODES.SELECT && pasteTouchStartCoords && !pasteTouchCanceled && !isPinching) {
+            // options.target が無く、かつ動いていない場合のみ表示
+            if (!options.target) {
+                showContextMenu(pasteTouchStartCoords.x, pasteTouchStartCoords.y, true, pageNum);
+            }
+        }
+        pasteTouchStartCoords = null;
+        pasteTouchCanceled = false;
+
         isErasing = false;
     });
 };
@@ -800,6 +827,7 @@ container.addEventListener('touchstart', (e) => {
     }
 
     if (e.touches.length >= 2) {
+        pasteTouchCanceled = true; // 2本目の指が触れたらペーストをキャンセル
         isPinching = true;
         isPanning = false;
         zoomWrapper.classList.add('fast-zoom'); // ズーム中はGPUキャッシュを使用して軽くする
