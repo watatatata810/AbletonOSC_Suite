@@ -415,8 +415,13 @@ let isErasing = false;
 const setupFabricEvents = (canvas, pageNum) => {
     
     // パス描画完了時に保存
-    canvas.on('path:created', () => {
+    canvas.on('path:created', (e) => {
         if (currentMode === MODES.DRAW) {
+            // ピンチ中、またはピンチ終了直後(500ms以内)のパスは、二本指パンの1本目が誤爆して描画されたものとして削除
+            if (isPinching || (Date.now() - lastPinchTime < 500)) {
+                canvas.remove(e.path);
+                return;
+            }
             saveCurrentPage(pageNum);
         }
     });
@@ -506,6 +511,7 @@ let isPanning = false;
 let initialDistance = 0;
 let initialZoom = 1.0;
 let lastCenter = { x: 0, y: 0 };
+let lastPinchTime = 0;
 
 // 慣性スクロール（モメンタム）用
 let velocityX = 0;
@@ -649,6 +655,7 @@ container.addEventListener('touchend', (e) => {
     if (e.touches.length < 2) {
         if (isPinching) {
             isPinching = false;
+            lastPinchTime = Date.now();
             zoomWrapper.classList.remove('fast-zoom'); // ズーム終了時に高画質ベクターの再計算を許可
         }
         // モード復帰
