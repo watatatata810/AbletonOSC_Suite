@@ -881,9 +881,10 @@ container.addEventListener('touchstart', (e) => {
                 }
             }
         });
-    } else if (e.touches.length === 1 && currentMode === MODES.VIEW) {
-        // 閲覧モード時の1本指パン
-        isPanning = true;
+    } else if (e.touches.length === 1 && (currentMode === MODES.VIEW || currentMode === MODES.SELECT || currentMode === MODES.TRIGGER)) {
+        // 1本指パンの準備 (SELECT/TRIGGERモードではtouchmove時にオブジェクトを触っていないか確認してパン開始)
+        isPanning = (currentMode === MODES.VIEW); // VIEWモードは無条件でパン開始
+        container._potentialPan = true;
         lastCenter = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         lastTouchTime = Date.now();
         velocityX = 0;
@@ -947,27 +948,35 @@ container.addEventListener('touchmove', (e) => {
         container.scrollTop -= dy;
         
         lastCenter = currentCenter;
-    } else if (e.touches.length === 1 && isPanning) {
-        // 1本指でのパンスクロール（閲覧モードのみ）
-        e.preventDefault();
-        const currentCenter = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        const dx = currentCenter.x - lastCenter.x;
-        const dy = currentCenter.y - lastCenter.y;
-        
-        // 慣性スクロールのための速度計算
-        const now = Date.now();
-        const dt = now - lastTouchTime;
-        if (dt > 0) {
-            // スワイプ速度を直近の移動量から算出（指を離す直前の速度を重視する）
-            velocityX = (dx / dt) * 0.8 + velocityX * 0.2;
-            velocityY = (dy / dt) * 0.8 + velocityY * 0.2;
+    } else if (e.touches.length === 1) {
+        if (container._potentialPan && !touchTargetObject) {
+            // オブジェクトを触っていなければパンに昇格
+            isPanning = true;
+            container._potentialPan = false;
         }
-        lastTouchTime = now;
-        
-        container.scrollLeft -= dx;
-        container.scrollTop -= dy;
-        
-        lastCenter = currentCenter;
+
+        if (isPanning) {
+            // 1本指でのパンスクロール
+            e.preventDefault();
+            const currentCenter = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            const dx = currentCenter.x - lastCenter.x;
+            const dy = currentCenter.y - lastCenter.y;
+            
+            // 慣性スクロールのための速度計算
+            const now = Date.now();
+            const dt = now - lastTouchTime;
+            if (dt > 0) {
+                // スワイプ速度を直近の移動量から算出（指を離す直前の速度を重視する）
+                velocityX = (dx / dt) * 0.8 + velocityX * 0.2;
+                velocityY = (dy / dt) * 0.8 + velocityY * 0.2;
+            }
+            lastTouchTime = now;
+            
+            container.scrollLeft -= dx;
+            container.scrollTop -= dy;
+            
+            lastCenter = currentCenter;
+        }
     }
 }, { passive: false });
 
