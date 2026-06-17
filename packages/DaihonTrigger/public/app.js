@@ -287,6 +287,16 @@ const renderAllPages = async () => {
         pageContainer.style.width = `${viewport.width}px`;
         pageContainer.style.height = `${viewport.height}px`;
         
+        if (num === 1) {
+            setMode(MODES.VIEW); // 初期モード適用
+            // 最初のページの幅が確定した直後にスクロール位置をリセットする
+            const scaledPdfWidth = viewport.width * currentZoom;
+            const centerX = 250 + (scaledPdfWidth / 2);
+            const centerY = 250;
+            container.scrollLeft = Math.max(0, centerX - (window.innerWidth / 2));
+            container.scrollTop = Math.max(0, centerY - 50);
+        }
+        
         // --- 高解像度Canvasレンダリング (SVGの代わり) ---
         // iOS等で複雑なPDFをSVG化すると処理落ちや描画失敗が起きるためCanvasを使用
         const dpr = window.devicePixelRatio || 1;
@@ -351,23 +361,7 @@ const renderAllPages = async () => {
 
         // イベント設定
         setupFabricEvents(fabCanvas, num);
-    }
-    setMode(MODES.VIEW); // 初期モード適用
-    
-    setTimeout(() => {
-        const firstPage = document.querySelector('.page-container');
-        const pdfWidth = firstPage ? firstPage.clientWidth : 800;
-        
-        const scaledPdfWidth = pdfWidth * currentZoom;
-        
-        // #zoom-wrapper は left: 250px, top: 250px に絶対配置されているため、
-        // どんなズーム倍率でもPDFの原点（左上角）は必ず (250, 250) となる。
-        const centerX = 250 + (scaledPdfWidth / 2);
-        const centerY = 250;
-        
-        container.scrollLeft = centerX - (window.innerWidth / 2);
-        container.scrollTop = centerY - 50; // 上部に少し余裕を持たせる
-    }, 100);
+    } // for loop end
 };
 
 // --- ナビゲーション機能 ---
