@@ -418,6 +418,15 @@ const renderAllPages = async () => {
         if (pagesData[num]) {
             fabCanvas.isRestoring = true;
             fabCanvas.loadFromJSON(pagesData[num], () => {
+                // 既存のトリガーボタンも高画質化するためキャッシュを無効化
+                fabCanvas.getObjects().forEach(obj => {
+                    if (obj.isTrigger) {
+                        obj.set('objectCaching', false);
+                        if (obj.getObjects) {
+                            obj.getObjects().forEach(child => child.set('objectCaching', false));
+                        }
+                    }
+                });
                 setMode(currentMode);
                 fabCanvas.renderAll();
                 fabCanvas.isRestoring = false;
@@ -1174,13 +1183,15 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
     const rect = new fabric.Rect({
         width: 280, height: 100, fill: isScene ? '#007aff' : '#ff2d55', rx: 20, ry: 20,
         originX: 'center', originY: 'center',
-        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 10, offsetX: 4, offsetY: 4 })
+        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 10, offsetX: 4, offsetY: 4 }),
+        objectCaching: false // キャッシュを使わず常にネイティブ解像度で描画
     });
     
     const text = new fabric.Text(labelText, {
-        fontSize: 32, fill: '#ffffff', fontWeight: 'bold',
+        fontSize: 48, fill: '#ffffff', fontWeight: 'bold', // 余白を減らすため文字をさらに大きく
         fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
-        originX: 'center', originY: 'center', textAlign: 'center'
+        originX: 'center', originY: 'center', textAlign: 'center',
+        objectCaching: false
     });
     
     const group = new fabric.Group([rect, text], {
@@ -1188,6 +1199,7 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
         originX: 'center', originY: 'center',
         scaleX: 0.5, scaleY: 0.5,
         hasControls: true, hasBorders: true,
+        objectCaching: false,
         isTrigger: true,
         isSceneTrigger: isScene,
         trackNum: isScene ? null : trackIndex + 1,
