@@ -481,19 +481,31 @@ const setupFabricEvents = (canvas, pageNum) => {
             activeDragObject = obj;
             activeDragStartCanvasNum = pageNum;
             
+            // ゴーストに選択枠（ピンクの枠など）が描画されないよう一時的にオフ
+            const origHasControls = obj.hasControls;
+            const origHasBorders = obj.hasBorders;
+            obj.set({ hasControls: false, hasBorders: false });
+            
             // オブジェクトの見た目を画像化
             const dataUrl = obj.toDataURL({ format: 'png' });
             dragGhost.src = dataUrl;
             dragGhost.style.display = 'block';
+            
+            // 元に戻す
+            obj.set({ hasControls: origHasControls, hasBorders: origHasBorders });
             
             // ズームを加味したゴーストのサイズ設定
             const bound = obj.getBoundingRect();
             dragGhost.style.width = `${bound.width}px`;
             dragGhost.style.height = `${bound.height}px`;
             
-            // マウスカーソルに対するオフセット
-            dragOffsetX = clientX - bound.left;
-            dragOffsetY = clientY - bound.top;
+            // マウスカーソルに対する正確なオフセット（キャンバスの絶対座標を考慮）
+            const canvasRect = canvas.lowerCanvasEl.getBoundingClientRect();
+            const absoluteObjLeft = canvasRect.left + bound.left;
+            const absoluteObjTop = canvasRect.top + bound.top;
+            
+            dragOffsetX = clientX - absoluteObjLeft;
+            dragOffsetY = clientY - absoluteObjTop;
             
             obj.set('opacity', 0.2); // 元のオブジェクトを半透明に
         }
