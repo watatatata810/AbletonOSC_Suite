@@ -562,7 +562,9 @@ const setupFabricEvents = (canvas, pageNum) => {
                     activeDragObject.clone((clonedObj) => {
                         clonedObj.set({ left: newLeft, top: newTop });
                         targetCanvas.add(clonedObj);
+                        targetCanvas.requestRenderAll();
                         canvas.remove(activeDragObject);
+                        canvas.requestRenderAll();
                         
                         saveCurrentPage(pageNum);
                         saveCurrentPage(targetPageNum);
@@ -754,9 +756,10 @@ container.addEventListener('touchmove', (e) => {
             const absoluteX = container.scrollLeft + relX;
             const absoluteY = container.scrollTop + relY;
             
-            // スケールの基準点（transform-origin）は #zoom-wrapper の左上、つまり絶対座標 (250, 250)
-            const originX = 250;
-            const originY = 250;
+            // スケールの基準点（transform-origin）は #zoom-wrapper の左上
+            // レイアウト変更や画面幅に依存しないよう、実際のDOM位置から取得する
+            const originX = zoomWrapper.offsetLeft || 250;
+            const originY = zoomWrapper.offsetTop || 250;
             
             const distX = absoluteX - originX;
             const distY = absoluteY - originY;
