@@ -494,16 +494,18 @@ const setupFabricEvents = (canvas, pageNum) => {
             
             // パディングなしの純粋なオブジェクト領域を取得
             const bound = obj.getBoundingRect();
-            dragGhost.style.width = `${bound.width}px`;
-            dragGhost.style.height = `${bound.height}px`;
+            // ゴースト画像は画面のbody直下にあるため、CSSズームを掛けたサイズにする
+            dragGhost.style.width = `${bound.width * currentZoom}px`;
+            dragGhost.style.height = `${bound.height * currentZoom}px`;
             
             // 元の設定に戻す
             obj.set({ hasControls: origHasControls, hasBorders: origHasBorders, padding: origPadding });
             
-            // マウスカーソルに対する正確なオフセット（キャンバスの絶対座標を考慮）
+            // マウスカーソルに対する正確なオフセット（キャンバスの絶対座標とズームを考慮）
             const canvasRect = canvas.lowerCanvasEl.getBoundingClientRect();
-            const absoluteObjLeft = canvasRect.left + bound.left;
-            const absoluteObjTop = canvasRect.top + bound.top;
+            // boundの座標はCanvas内部の論理値なので、画面上の位置にするにはズームを掛ける
+            const absoluteObjLeft = canvasRect.left + (bound.left * currentZoom);
+            const absoluteObjTop = canvasRect.top + (bound.top * currentZoom);
             
             dragOffsetX = clientX - absoluteObjLeft;
             dragOffsetY = clientY - absoluteObjTop;
