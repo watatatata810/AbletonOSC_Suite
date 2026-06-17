@@ -773,7 +773,11 @@ const setupFabricEvents = (canvas, pageNum) => {
         if (currentMode === MODES.SELECT && pasteTouchStartCoords && !pasteTouchCanceled && !isPinching) {
             // options.target が無く、かつ動いていない場合のみ表示
             if (!options.target) {
-                showContextMenu(pasteTouchStartCoords.x, pasteTouchStartCoords.y, true, pageNum);
+                if (contextMenu.classList.contains('visible')) {
+                    hideContextMenu();
+                } else {
+                    showContextMenu(pasteTouchStartCoords.x, pasteTouchStartCoords.y, true, pageNum);
+                }
             }
         }
         pasteTouchStartCoords = null;
