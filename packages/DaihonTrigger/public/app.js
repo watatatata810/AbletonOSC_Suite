@@ -92,6 +92,66 @@ let activeDragStartCanvasNum = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
+// --- コンテキストメニュー（コピー・ペースト） ---
+let clipboardObject = null;
+const contextMenu = document.getElementById('context-menu');
+const btnCtxCopy = document.getElementById('btn-ctx-copy');
+const btnCtxPaste = document.getElementById('btn-ctx-paste');
+const btnCtxDelete = document.getElementById('btn-ctx-delete');
+
+let contextTargetCanvasNum = null; // 現在メニューが表示されているキャンバスの番号
+let contextMenuTimeout = null;
+
+const hideContextMenu = () => {
+    contextMenu.classList.remove('visible');
+    clearTimeout(contextMenuTimeout);
+    contextMenuTimeout = setTimeout(() => {
+        if (!contextMenu.classList.contains('visible')) {
+            contextMenu.classList.add('hidden');
+        }
+    }, 200);
+};
+
+const showContextMenu = (x, y, showPasteOnly = false, canvasNum = null) => {
+    if (showPasteOnly && !clipboardObject) return; // ペーストのみでクリップボード空なら出さない
+    
+    contextTargetCanvasNum = canvasNum;
+    contextMenu.classList.remove('hidden');
+    clearTimeout(contextMenuTimeout);
+    
+    requestAnimationFrame(() => {
+        contextMenu.classList.add('visible');
+    });
+    
+    // 表示内容の切り替え
+    if (showPasteOnly) {
+        btnCtxCopy.style.display = 'none';
+        btnCtxDelete.style.display = 'none';
+        btnCtxPaste.style.display = 'block';
+    } else {
+        btnCtxCopy.style.display = 'block';
+        btnCtxDelete.style.display = 'block';
+        btnCtxPaste.style.display = 'none';
+    }
+    
+    // 位置計算
+    const rect = contextMenu.getBoundingClientRect();
+    // DOMに追加された直後はrectの幅が0の場合があるので、大体のサイズ(150px*40px)を仮定
+    const w = rect.width || 150;
+    const h = rect.height || 40;
+    
+    let left = x - w / 2;
+    let top = y - h - 15;
+    
+    if (left < 10) left = 10;
+    if (left + w > window.innerWidth - 10) left = window.innerWidth - w - 10;
+    if (top < 10) top = y + 25;
+    
+    contextMenu.style.left = `${left}px`;
+    contextMenu.style.top = `${top}px`;
+};
+
+
 const triggerSettingsPanel = document.getElementById('trigger-settings');
 const continuousModeCheckbox = document.getElementById('continuous-trigger-mode');
 const continuousStatusContainer = document.getElementById('continuous-status-container');
@@ -577,6 +637,27 @@ const setupFabricEvents = (canvas, pageNum) => {
         }
     });
     
+    const updateContextMenuPosition = () => {
+        if (currentMode !== MODES.SELECT) return;
+        const obj = canvas.getActiveObject();
+        if (!obj) return;
+        
+        const canvasRect = canvas.lowerCanvasEl.getBoundingClientRect();
+        const bound = obj.getBoundingRect();
+        
+        const x = canvasRect.left + (bound.left * currentZoom) + (bound.width * currentZoom / 2);
+        const y = canvasRect.top + (bound.top * currentZoom);
+        
+        showContextMenu(x, y, false, pageNum);
+    };
+
+    canvas.on('selection:created', updateContextMenuPosition);
+    canvas.on('selection:updated', updateContextMenuPosition);
+    
+    canvas.on('selection:cleared', () => {
+        if (contextTargetCanvasNum === pageNum) hideContextMenu();
+    });
+    
     // 消しゴム等で消えた後に保存
     canvas.on('object:removed', () => {
         if (!canvas.isRestoring) saveCurrentPage(pageNum);
@@ -584,6 +665,22 @@ const setupFabricEvents = (canvas, pageNum) => {
 
     // マウスダウン・タッチイベント
     canvas.on('mouse:down', (options) => {
+        if (currentMode === MODES.SELECT && !options.target) {
+            // 他のキャンバスでメニューが出ていたら消す
+            if (contextTargetCanvasNum && contextTargetCanvasNum !== pageNum) {
+                hideContextMenu();
+            }
+            const e = options.e;
+            let clientX = e.clientX || 0;
+            let clientY = e.clientY || 0;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            }
+            // 空白部分タップでペーストメニュー表示 (クリップボードが空なら関数内で弾かれる)
+            showContextMenu(clientX, clientY, true, pageNum);
+        }
+
         // アンドゥ用に状態保存 (トリガー配置・描画・消去の直前状態)
         if (currentMode === MODES.DRAW || currentMode === MODES.ERASER || currentMode === MODES.TRIGGER) {
             saveStateForUndo(pageNum);
@@ -1209,4 +1306,70 @@ if (btnExport) {
             btnExport.disabled = false;
         }
     });
+    });
 }
+
+// --- コンテキストメニューのボタンイベント ---
+btnCtxCopy.addEventListener('click', () => {
+    if (!contextTargetCanvasNum) return;
+    const canvas = fabricCanvases[contextTargetCanvasNum];
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (!activeObj) return;
+    
+    // オブジェクトのクローンを非同期で作成してクリップボードに保存
+    activeObj.clone((cloned) => {
+        clipboardObject = cloned;
+        hideContextMenu();
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
+});
+
+btnCtxDelete.addEventListener('click', () => {
+    if (!contextTargetCanvasNum) return;
+    const canvas = fabricCanvases[contextTargetCanvasNum];
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (!activeObj) return;
+    
+    saveStateForUndo(contextTargetCanvasNum);
+    canvas.remove(activeObj);
+    canvas.discardActiveObject();
+    hideContextMenu();
+});
+
+btnCtxPaste.addEventListener('click', () => {
+    if (!clipboardObject || !contextTargetCanvasNum) return;
+    const canvas = fabricCanvases[contextTargetCanvasNum];
+    if (!canvas) return;
+    
+    saveStateForUndo(contextTargetCanvasNum);
+    
+    // もう一度クローンしてキャンバスに追加（同じものを何度もペーストできるようにするため）
+    clipboardObject.clone((cloned) => {
+        // メニューの「ペースト」ボタンを出した位置付近にペーストする
+        const rect = canvas.lowerCanvasEl.getBoundingClientRect();
+        // メニューのDOM要素の画面内座標
+        const menuRect = contextMenu.getBoundingClientRect();
+        // 中心より少し下くらい
+        const px = menuRect.left + menuRect.width / 2;
+        const py = menuRect.top + 30;
+        
+        // 画面座標をキャンバス内の論理座標に変換
+        const logicalLeft = (px - rect.left) / currentZoom;
+        const logicalTop = (py - rect.top) / currentZoom;
+        
+        cloned.set({
+            left: logicalLeft,
+            top: logicalTop,
+            evented: true
+        });
+
+        canvas.add(cloned);
+        canvas.setActiveObject(cloned);
+        canvas.requestRenderAll();
+        hideContextMenu();
+        saveCurrentPage(contextTargetCanvasNum);
+    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
+});
