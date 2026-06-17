@@ -677,8 +677,7 @@ let momentumId = null;
 // ズーム更新の最適化（ガクツキ防止）
 let isZoomTicking = false;
 
-const updateZoom = (newZoom) => {
-    currentZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
+const applyZoomTransform = () => {
     zoomWrapper.style.transform = `scale(${currentZoom})`;
     zoomLevelSpan.textContent = `${Math.round(currentZoom * 100)}%`;
 };
@@ -770,10 +769,13 @@ container.addEventListener('touchmove', (e) => {
             container.scrollLeft = (originX + newDistX) - relX;
             container.scrollTop = (originY + newDistY) - relY;
             
+            // 状態（変数）は即座に同期更新し、次回のtouchmoveで計算が狂うのを防ぐ
+            currentZoom = clampedZoom;
+            
             // ズーム描画の間引き（GPU負荷軽減）
             if (!isZoomTicking) {
                 requestAnimationFrame(() => {
-                    updateZoom(clampedZoom);
+                    applyZoomTransform();
                     isZoomTicking = false;
                 });
                 isZoomTicking = true;
@@ -875,8 +877,8 @@ container.addEventListener('wheel', (e) => {
             const absoluteX = container.scrollLeft + relX;
             const absoluteY = container.scrollTop + relY;
             
-            const originX = 250;
-            const originY = 250;
+            const originX = zoomWrapper.offsetLeft || 250;
+            const originY = zoomWrapper.offsetTop || 250;
             
             const distX = absoluteX - originX;
             const distY = absoluteY - originY;
@@ -887,9 +889,12 @@ container.addEventListener('wheel', (e) => {
             container.scrollLeft = (originX + newDistX) - relX;
             container.scrollTop = (originY + newDistY) - relY;
             
+            // 状態（変数）は即座に同期更新する
+            currentZoom = clampedZoom;
+            
             if (!isZoomTicking) {
                 requestAnimationFrame(() => {
-                    updateZoom(clampedZoom);
+                    applyZoomTransform();
                     isZoomTicking = false;
                 });
                 isZoomTicking = true;
