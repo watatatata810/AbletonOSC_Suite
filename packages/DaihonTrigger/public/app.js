@@ -911,7 +911,7 @@ socket.on('all_data_loaded', (data) => {
     currentPdfName = data.activePdfName || 'sample.pdf';
     pagesData = data.pagesData || {};
     
-    const pdfUrl = `/assets/${currentPdfName}?t=` + Date.now(); // キャッシュ回避
+    const pdfUrl = `/assets/${encodeURIComponent(currentPdfName)}?t=` + Date.now(); // キャッシュ回避
     
     pdfjsLib.getDocument(pdfUrl).promise.then((pdfDoc_) => {
         pdfDoc = pdfDoc_;
@@ -940,13 +940,22 @@ if (btnUpload && inputUpload) {
         if (!e.target.files || e.target.files.length === 0) return;
         
         const file = e.target.files[0];
-        const formData = new FormData();
-        formData.append('pdf', file);
         
-        btnUpload.textContent = 'アップロード中...';
+        btnUpload.textContent = '読込中...';
         btnUpload.disabled = true;
 
         try {
+            // iOS Safari等のクラウドファイルピッカーのバグ対策：
+            // 実データのダウンロード完了を待つため、一度ArrayBufferとして全て読み込んでからBlobに再構築する
+            const arrayBuffer = await file.arrayBuffer();
+            const safeBlob = new Blob([arrayBuffer], { type: file.type || 'application/pdf' });
+            
+            const formData = new FormData();
+            // 第3引数に元のファイル名を指定
+            formData.append('pdf', safeBlob, file.name);
+            
+            btnUpload.textContent = 'アップロード中...';
+
             const res = await fetch('/upload-pdf', {
                 method: 'POST',
                 body: formData
@@ -988,7 +997,7 @@ if (btnExport) {
         
         try {
             // 1. 元のPDFをダウンロードして pdf-lib でロード
-            const pdfUrl = `/assets/${currentPdfName}?t=${Date.now()}`;
+            const pdfUrl = `/assets/${encodeURIComponent(currentPdfName)}?t=${Date.now()}`;
             const existingPdfBytes = await fetch(pdfUrl).then(res => res.arrayBuffer());
             
             const { PDFDocument } = PDFLib;
