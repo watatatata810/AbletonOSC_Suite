@@ -1170,14 +1170,15 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
 
     const canvas = fabricCanvases[pendingTriggerPage];
     
+    // 高画質化のため、2倍のサイズで作成して0.5倍にスケールダウンする
     const rect = new fabric.Rect({
-        width: 140, height: 50, fill: isScene ? '#007aff' : '#ff2d55', rx: 10, ry: 10,
+        width: 280, height: 100, fill: isScene ? '#007aff' : '#ff2d55', rx: 20, ry: 20,
         originX: 'center', originY: 'center',
-        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 5, offsetX: 2, offsetY: 2 })
+        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 10, offsetX: 4, offsetY: 4 })
     });
     
     const text = new fabric.Text(labelText, {
-        fontSize: 16, fill: '#ffffff', fontWeight: 'bold',
+        fontSize: 32, fill: '#ffffff', fontWeight: 'bold',
         fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
         originX: 'center', originY: 'center', textAlign: 'center'
     });
@@ -1185,6 +1186,7 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
     const group = new fabric.Group([rect, text], {
         left: pendingTriggerPos.x, top: pendingTriggerPos.y,
         originX: 'center', originY: 'center',
+        scaleX: 0.5, scaleY: 0.5,
         hasControls: true, hasBorders: true,
         isTrigger: true,
         isSceneTrigger: isScene,
