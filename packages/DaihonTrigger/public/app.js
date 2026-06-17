@@ -1306,7 +1306,6 @@ if (btnExport) {
             btnExport.disabled = false;
         }
     });
-    });
 }
 
 // --- コンテキストメニューのボタンイベント ---
