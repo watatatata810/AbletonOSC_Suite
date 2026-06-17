@@ -20,6 +20,11 @@
 
         <!-- 上部ヘッダーコントロール -->
         <header id="controls">
+            <div style="display: flex; gap: 5px;">
+                <button id="btn-upload-pdf" class="nav-btn">PDF変更</button>
+                <button id="btn-export-pdf" class="nav-btn" style="background-color: #ff9500;">PDF書出</button>
+                <input type="file" id="pdf-upload-input" accept="application/pdf" class="hidden">
+            </div>
             <button id="btn-toggle-sidebar" class="nav-btn">≡ 目次</button>
             <div id="page-info">
                 Page: <input type="number" id="current-page-input" value="1" min="1" max="999"> / <span id="page-count">--</span>
@@ -34,10 +39,7 @@
                 <button id="mode-eraser" class="nav-btn">消しゴム</button>
             </div>
             <div>
-                <button id="btn-undo" class="nav-btn">元に戻す</button>
-                <button id="btn-export-pdf" class="nav-btn" style="background-color: #ff9500;">PDF書出</button>
-                <button id="btn-upload-pdf" class="nav-btn">PDF変更</button>
-                <input type="file" id="pdf-upload-input" accept="application/pdf" class="hidden">
+                <button id="btn-undo" class="nav-btn" title="元に戻す" style="font-size: 18px; padding: 2px 12px; font-weight: bold;">↺</button>
             </div>
         </header>
 
