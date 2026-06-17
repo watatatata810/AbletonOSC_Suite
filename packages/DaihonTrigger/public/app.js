@@ -951,8 +951,8 @@ if (btnUpload && inputUpload) {
             const safeBlob = new Blob([arrayBuffer], { type: file.type || 'application/pdf' });
             
             const formData = new FormData();
-            // 第3引数に元のファイル名を指定
-            formData.append('pdf', safeBlob, file.name);
+            // multerでの文字化けを完全に防ぐため、ファイル名をURLエンコードして送信する
+            formData.append('pdf', safeBlob, encodeURIComponent(file.name));
             
             btnUpload.textContent = 'アップロード中...';
 

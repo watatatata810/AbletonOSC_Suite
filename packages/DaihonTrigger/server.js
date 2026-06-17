@@ -43,8 +43,14 @@ const storage = multer.diskStorage({
         cb(null, dir);
     },
     filename: function (req, file, cb) {
-        // 日本語ファイル名の文字化けを防ぐため、Buffer経由でUTF-8デコード
-        const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        // クライアント側で encodeURIComponent されたファイル名をデコードして復元する
+        // これによりiOS/Windows等OSやブラウザの違いによる文字化けを完全に防ぐ
+        let originalName = file.originalname;
+        try {
+            originalName = decodeURIComponent(file.originalname);
+        } catch(e) {
+            console.error('[Upload] ファイル名のデコードに失敗しました:', e);
+        }
         activePdfName = originalName;
         cb(null, originalName);
     }
