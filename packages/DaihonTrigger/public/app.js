@@ -68,7 +68,7 @@ const undo = () => {
 document.getElementById('btn-undo').addEventListener('click', undo);
 
 // モード管理
-const MODES = { VIEW: 'view', DRAW: 'draw', ERASER: 'eraser', TRIGGER: 'trigger' };
+const MODES = { VIEW: 'view', SELECT: 'select', DRAW: 'draw', ERASER: 'eraser', TRIGGER: 'trigger' };
 let currentMode = MODES.VIEW;
 let pendingTriggerPos = null;
 let pendingTriggerPage = null;
@@ -171,6 +171,7 @@ document.querySelector('.color-btn[data-color="rgba(255,0,0,0.7)"]').classList.a
 
 const modeBtns = {
     view: document.getElementById('mode-view'),
+    select: document.getElementById('mode-select'),
     draw: document.getElementById('mode-draw'),
     eraser: document.getElementById('mode-eraser'),
     trigger: document.getElementById('mode-trigger')
@@ -181,6 +182,7 @@ const setMode = (mode) => {
     Object.values(modeBtns).forEach(btn => btn.classList.remove('active'));
     
     if (mode === MODES.VIEW) modeBtns.view.classList.add('active');
+    else if (mode === MODES.SELECT) modeBtns.select.classList.add('active');
     else if (mode === MODES.DRAW) modeBtns.draw.classList.add('active');
     else if (mode === MODES.ERASER) modeBtns.eraser.classList.add('active');
     else if (mode === MODES.TRIGGER) modeBtns.trigger.classList.add('active');
@@ -211,8 +213,14 @@ const setMode = (mode) => {
         }
 
         canvas.forEachObject(obj => {
-            obj.selectable = (mode === MODES.TRIGGER);
+            obj.selectable = (mode === MODES.SELECT);
             obj.evented = true;
+            
+            // ペンで描いた線（isTriggerがないオブジェクト）の当たり判定を拡大
+            if (!obj.isTrigger && obj.type === 'path') {
+                obj.perPixelTargetFind = false;
+                obj.padding = 10;
+            }
         });
         canvas.requestRenderAll();
     });
@@ -422,6 +430,9 @@ const setupFabricEvents = (canvas, pageNum) => {
                 canvas.remove(e.path);
                 return;
             }
+            e.path.perPixelTargetFind = false;
+            e.path.padding = 10;
+            e.path.selectable = (currentMode === MODES.SELECT);
             saveCurrentPage(pageNum);
         }
     });
