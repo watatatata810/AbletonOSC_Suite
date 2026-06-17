@@ -481,23 +481,24 @@ const setupFabricEvents = (canvas, pageNum) => {
             activeDragObject = obj;
             activeDragStartCanvasNum = pageNum;
             
-            // ゴーストに選択枠（ピンクの枠など）が描画されないよう一時的にオフ
+            // ゴーストに選択枠やパディングが写り込まないよう一時的にオフ
             const origHasControls = obj.hasControls;
             const origHasBorders = obj.hasBorders;
-            obj.set({ hasControls: false, hasBorders: false });
+            const origPadding = obj.padding || 0;
+            obj.set({ hasControls: false, hasBorders: false, padding: 0 });
             
-            // オブジェクトの見た目を画像化
-            const dataUrl = obj.toDataURL({ format: 'png' });
+            // ズームを加味して高画質に画像化
+            const dataUrl = obj.toDataURL({ format: 'png', multiplier: currentZoom });
             dragGhost.src = dataUrl;
             dragGhost.style.display = 'block';
             
-            // 元に戻す
-            obj.set({ hasControls: origHasControls, hasBorders: origHasBorders });
-            
-            // ズームを加味したゴーストのサイズ設定
+            // パディングなしの純粋なオブジェクト領域を取得
             const bound = obj.getBoundingRect();
             dragGhost.style.width = `${bound.width}px`;
             dragGhost.style.height = `${bound.height}px`;
+            
+            // 元の設定に戻す
+            obj.set({ hasControls: origHasControls, hasBorders: origHasBorders, padding: origPadding });
             
             // マウスカーソルに対する正確なオフセット（キャンバスの絶対座標を考慮）
             const canvasRect = canvas.lowerCanvasEl.getBoundingClientRect();
