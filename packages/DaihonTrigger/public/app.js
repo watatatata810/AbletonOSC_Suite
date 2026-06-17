@@ -1371,22 +1371,43 @@ if (btnExport) {
                 }
             }
             
-            // 3. 合成したPDFをブラウザでダウンロード
+            // 3. 合成したPDFを保存
             const pdfBytes = await pdfDocLib.save();
             const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-            const url = URL.createObjectURL(blob);
+            const defaultFilename = `Exported_${currentPdfName}`;
             
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Exported_${currentPdfName}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            if (window.showSaveFilePicker) {
+                // File System Access API (Chrome/Edge等) を使用して保存先を選択させる
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: defaultFilename,
+                    types: [{
+                        description: 'PDF File',
+                        accept: { 'application/pdf': ['.pdf'] }
+                    }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+            } else {
+                // 非対応ブラウザのフォールバック（従来通りダウンロード）
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = defaultFilename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
             
         } catch (err) {
-            console.error('PDF Export Error:', err);
-            alert('PDFの書き出し中にエラーが発生しました。コンソールをご確認ください。');
+            if (err.name === 'AbortError') {
+                // ユーザーが保存ダイアログでキャンセルした場合は無視
+                console.log('PDF export was canceled by the user.');
+            } else {
+                console.error('PDF Export Error:', err);
+                alert('PDFの書き出し中にエラーが発生しました。コンソールをご確認ください。');
+            }
         } finally {
             btnExport.textContent = '⬇️ PDF書き出し';
             btnExport.disabled = false;
