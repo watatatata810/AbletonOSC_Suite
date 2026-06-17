@@ -437,8 +437,6 @@ const setupFabricEvents = (canvas, pageNum) => {
             
             if (isContinuousMode && nextContinuousSceneIndex !== null) {
                 placeTrigger(null, nextContinuousSceneIndex, null, true);
-                nextContinuousSceneIndex++;
-                updateContinuousStatusUI();
                 return;
             }
 
