@@ -699,7 +699,7 @@ const setupFabricEvents = (canvas, pageNum) => {
                 clientY = e.touches[0].clientY;
             }
             pasteTouchStartCoords = { x: clientX, y: clientY };
-        } else if (currentMode === MODES.VIEW) {
+        } else if (currentMode === MODES.VIEW || currentMode === MODES.TRIGGER) {
             pasteTouchCanceled = false;
             let clientX = e.clientX || 0;
             let clientY = e.clientY || 0;
@@ -715,34 +715,7 @@ const setupFabricEvents = (canvas, pageNum) => {
             saveStateForUndo(pageNum);
         }
 
-        if (currentMode === MODES.TRIGGER && !options.target) {
-            pendingTriggerPos = canvas.getPointer(options.e);
-            pendingTriggerPage = pageNum;
-            
-            if (isContinuousMode && nextContinuousSceneIndex !== null) {
-                placeTrigger(null, nextContinuousSceneIndex, null, true);
-                return;
-            }
-
-            const triggerModal = document.getElementById('trigger-modal');
-            const modalLoading = document.getElementById('modal-loading');
-            const gridContainer = document.getElementById('modal-grid-container');
-            
-            triggerModal.classList.remove('hidden');
-            
-            if (cachedSessionData) {
-                modalLoading.style.display = 'none';
-                gridContainer.classList.remove('hidden');
-                renderSessionGrid(cachedSessionData);
-            } else {
-                modalLoading.style.display = 'block';
-                gridContainer.classList.add('hidden');
-                if (!isFetchingSessionData) {
-                    isFetchingSessionData = true;
-                    socket.emit('get_session_data');
-                }
-            }
-        } else if (currentMode === MODES.ERASER) {
+        if (currentMode === MODES.ERASER) {
             isErasing = true;
             if (options.target) canvas.remove(options.target);
         }
@@ -805,6 +778,35 @@ const setupFabricEvents = (canvas, pageNum) => {
                 if (targetRef) targetRef.set('opacity', 1);
                 canvas.renderAll();
             }, 200);
+        }
+
+        // トリガー配置モーダルのタップ完了判定
+        if (currentMode === MODES.TRIGGER && !touchTargetObject && pasteTouchStartCoords && !pasteTouchCanceled && !isPinching) {
+            pendingTriggerPos = canvas.getPointer(options.e);
+            pendingTriggerPage = pageNum;
+            
+            if (isContinuousMode && nextContinuousSceneIndex !== null) {
+                placeTrigger(null, nextContinuousSceneIndex, null, true);
+            } else {
+                const triggerModal = document.getElementById('trigger-modal');
+                const modalLoading = document.getElementById('modal-loading');
+                const gridContainer = document.getElementById('modal-grid-container');
+                
+                triggerModal.classList.remove('hidden');
+                
+                if (cachedSessionData) {
+                    modalLoading.style.display = 'none';
+                    gridContainer.classList.remove('hidden');
+                    renderSessionGrid(cachedSessionData);
+                } else {
+                    modalLoading.style.display = 'block';
+                    gridContainer.classList.add('hidden');
+                    if (!isFetchingSessionData) {
+                        isFetchingSessionData = true;
+                        socket.emit('get_session_data');
+                    }
+                }
+            }
         }
 
         pasteTouchStartCoords = null;
@@ -1218,6 +1220,12 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
 
 socket.emit('load_all_data');
 socket.on('all_data_loaded', (data) => {
+    // 初回ロード時にAbletonのセッションデータをバックグラウンドで取得開始（高速化）
+    if (!isFetchingSessionData && !cachedSessionData) {
+        isFetchingSessionData = true;
+        socket.emit('get_session_data');
+    }
+
     currentPdfName = data.activePdfName || 'sample.pdf';
     pagesData = data.pagesData || {};
     
