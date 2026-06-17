@@ -1389,15 +1389,34 @@ if (btnExport) {
                 await writable.write(blob);
                 await writable.close();
             } else {
-                // 非対応ブラウザのフォールバック（従来通りダウンロード）
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = defaultFilename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                // 非対応ブラウザ (モバイルAndroid/iOSなど) の場合、
+                // まず Web Share API を使用して、OSネイティブの「ファイルに保存」メニューを呼び出す
+                let shared = false;
+                const file = new File([blob], defaultFilename, { type: 'application/pdf' });
+                
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try {
+                        await navigator.share({
+                            files: [file],
+                            title: 'Exported PDF'
+                        });
+                        shared = true; // 共有成功
+                    } catch (err) {
+                        console.log('Share canceled or failed', err);
+                    }
+                }
+                
+                if (!shared) {
+                    // Share機能が使えない、またはキャンセルされた場合の最終フォールバック（強制ダウンロード）
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = defaultFilename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
             }
             
         } catch (err) {
