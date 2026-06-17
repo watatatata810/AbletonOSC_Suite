@@ -9,24 +9,52 @@
 </head>
 <body>
     <div id="app-container">
+        <!-- ナビゲーションサイドバー -->
+        <div id="sidebar" class="sidebar-hidden">
+            <div id="sidebar-header">
+                <h3>Pages</h3>
+                <button id="btn-close-sidebar" class="icon-btn">×</button>
+            </div>
+            <div id="thumbnail-container"></div>
+        </div>
+
         <!-- 上部ヘッダーコントロール -->
         <header id="controls">
-            <span id="page-info">Total Pages: <span id="page-count">--</span></span>
-            <div id="zoom-controls" style="display: flex; align-items: center; gap: 15px;">
+            <button id="btn-toggle-sidebar" class="nav-btn">≡ 目次</button>
+            <div id="page-info">
+                Page: <input type="number" id="current-page-input" value="1" min="1" max="999"> / <span id="page-count">--</span>
+            </div>
+            <div id="zoom-controls">
                 <span>Zoom: <span id="zoom-level">100%</span></span>
-                <button id="btn-export-pdf" class="btn-primary" style="padding: 4px 12px; font-size: 0.9em; background-color: #ff9500;">⬇️ PDF書き出し</button>
-                <button id="btn-upload-pdf" class="btn-primary" style="padding: 4px 12px; font-size: 0.9em;">📄 PDF変更</button>
+            </div>
+            <div>
+                <button id="mode-view" class="nav-btn active">閲覧</button>
+                <button id="mode-trigger" class="nav-btn">トリガー</button>
+                <button id="mode-draw" class="nav-btn">ペン</button>
+                <button id="mode-eraser" class="nav-btn">消しゴム</button>
+            </div>
+            <div>
+                <button id="btn-undo" class="nav-btn">元に戻す</button>
+                <button id="btn-export-pdf" class="nav-btn" style="background-color: #ff9500;">PDF書出</button>
+                <button id="btn-upload-pdf" class="nav-btn">PDF変更</button>
                 <input type="file" id="pdf-upload-input" accept="application/pdf" class="hidden">
             </div>
         </header>
 
-        <!-- ツールバー（モード切替） -->
-        <div id="toolbar">
-            <button id="mode-view" class="tool-btn active">閲覧 / 操作モード</button>
-            <button id="mode-draw" class="tool-btn">手書きモード</button>
-            <button id="mode-eraser" class="tool-btn">消しゴム</button>
-            <button id="btn-undo" class="tool-btn action-btn">↩ アンドゥ</button>
-            <button id="mode-trigger" class="tool-btn">トリガー配置モード</button>
+        <!-- ペン設定パネル (サブヘッダー領域として独立) -->
+        <div id="pen-settings" class="pen-settings-hidden">
+            <div class="color-btn" data-color="rgba(0,0,0,0.7)" style="background-color: black;"></div>
+            <div class="color-btn" data-color="rgba(255,0,0,0.7)" style="background-color: red;"></div>
+            <div class="color-btn" data-color="rgba(0,255,0,0.7)" style="background-color: #34c759;"></div>
+            <div class="color-btn" data-color="rgba(0,122,255,0.7)" style="background-color: #007aff;"></div>
+            <div class="color-btn" data-color="rgba(255,204,0,0.7)" style="background-color: #ffcc00;"></div>
+            
+            <span style="margin-left: 15px;">太さ:</span>
+            <input type="number" id="pen-width-input" value="3" min="0.5" max="50" step="0.5" style="width: 60px;">
+            <button class="nav-btn pen-width-btn" data-width="0.5" style="padding: 4px 8px;">極細</button>
+            <button class="nav-btn pen-width-btn" data-width="2" style="padding: 4px 8px;">細</button>
+            <button class="nav-btn pen-width-btn" data-width="5" style="padding: 4px 8px;">中</button>
+            <button class="nav-btn pen-width-btn" data-width="10" style="padding: 4px 8px;">太</button>
         </div>
 
         <!-- メインキャンバスエリア -->

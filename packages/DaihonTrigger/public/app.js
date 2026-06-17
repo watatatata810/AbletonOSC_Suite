@@ -12,6 +12,14 @@ const scale = 1.5;
 const zoomWrapper = document.getElementById('zoom-wrapper');
 const pageCountSpan = document.getElementById('page-count');
 const zoomLevelSpan = document.getElementById('zoom-level');
+const currentPageInput = document.getElementById('current-page-input');
+const container = document.getElementById('canvas-container');
+
+// サイドバーDOM
+const sidebar = document.getElementById('sidebar');
+const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+const btnCloseSidebar = document.getElementById('btn-close-sidebar');
+const thumbnailContainer = document.getElementById('thumbnail-container');
 
 // ズーム状態
 let currentZoom = 1.0;
@@ -25,9 +33,20 @@ const MAX_UNDO = 20;
 const saveStateForUndo = (pageNum) => {
     const canvas = fabricCanvases[pageNum];
     if (!canvas) return;
+    
+    const newDataStr = JSON.stringify(canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger']));
+    
+    // ズーム操作等の誤タッチで同一状態が連続してスタックに積まれるのを防ぐ
+    if (undoStack.length > 0) {
+        const lastState = undoStack[undoStack.length - 1];
+        if (lastState.pageNum === pageNum && lastState.data === newDataStr) {
+            return;
+        }
+    }
+    
     undoStack.push({
         pageNum: pageNum,
-        data: JSON.stringify(canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum']))
+        data: newDataStr
     });
     if (undoStack.length > MAX_UNDO) undoStack.shift();
 };
@@ -54,6 +73,59 @@ let currentMode = MODES.VIEW;
 let pendingTriggerPos = null;
 let pendingTriggerPage = null;
 
+// ペン設定
+let currentPenColor = 'rgba(255, 0, 0, 0.7)'; // 初期値: 赤
+let currentPenWidth = 3;
+
+const penSettingsPanel = document.getElementById('pen-settings');
+const colorBtns = document.querySelectorAll('.color-btn');
+const penWidthInput = document.getElementById('pen-width-input');
+const penWidthBtns = document.querySelectorAll('.pen-width-btn');
+
+// ペン設定を全キャンバスに反映する関数
+const updatePenSettings = () => {
+    Object.values(fabricCanvases).forEach(canvas => {
+        if (canvas.freeDrawingBrush) {
+            canvas.freeDrawingBrush.color = currentPenColor;
+            canvas.freeDrawingBrush.width = currentPenWidth;
+        }
+    });
+};
+
+// 色選択イベント
+colorBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        colorBtns.forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        currentPenColor = btn.dataset.color;
+        updatePenSettings();
+    });
+});
+
+// 太さ直接入力イベント
+penWidthInput.addEventListener('change', (e) => {
+    let w = parseFloat(e.target.value);
+    if (isNaN(w) || w < 0.5) w = 0.5;
+    if (w > 50) w = 50;
+    e.target.value = w;
+    currentPenWidth = w;
+    updatePenSettings();
+});
+
+// 太さショートカットイベント
+penWidthBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const w = parseFloat(btn.dataset.width);
+        penWidthInput.value = w;
+        currentPenWidth = w;
+        updatePenSettings();
+    });
+});
+
+// 初期状態の設定
+document.querySelector('.color-btn[data-color="rgba(255,0,0,0.7)"]').classList.add('selected');
+
+
 const modeBtns = {
     view: document.getElementById('mode-view'),
     draw: document.getElementById('mode-draw'),
@@ -70,12 +142,19 @@ const setMode = (mode) => {
     else if (mode === MODES.ERASER) modeBtns.eraser.classList.add('active');
     else if (mode === MODES.TRIGGER) modeBtns.trigger.classList.add('active');
 
+    // ペンモードの時だけペン設定パネルを表示（アニメーション付きアコーディオン）
+    if (mode === MODES.DRAW) {
+        penSettingsPanel.classList.remove('pen-settings-hidden');
+    } else {
+        penSettingsPanel.classList.add('pen-settings-hidden');
+    }
+
     // 全キャンバスの設定を更新
     Object.values(fabricCanvases).forEach(canvas => {
         canvas.isDrawingMode = (mode === MODES.DRAW);
         if (mode === MODES.DRAW) {
-            canvas.freeDrawingBrush.color = 'rgba(255, 0, 0, 0.7)';
-            canvas.freeDrawingBrush.width = 3;
+            canvas.freeDrawingBrush.color = currentPenColor;
+            canvas.freeDrawingBrush.width = currentPenWidth;
         }
 
         canvas.forEachObject(obj => {
@@ -94,7 +173,7 @@ Object.keys(modeBtns).forEach(key => {
 const saveCurrentPage = (pageNum) => {
     const canvas = fabricCanvases[pageNum];
     if (!canvas || canvas.isRestoring) return;
-    const fabricData = canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum']);
+    const fabricData = canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger']);
     pagesData[pageNum] = fabricData;
     socket.emit('save_data', { pdfName: currentPdfName, pageNum: pageNum, fabricData: fabricData });
 };
@@ -102,21 +181,29 @@ const saveCurrentPage = (pageNum) => {
 // --- PDF連続描画とキャンバス初期化 ---
 const renderAllPages = async () => {
     pageCountSpan.textContent = pdfDoc.numPages;
+    currentPageInput.max = pdfDoc.numPages;
     zoomWrapper.innerHTML = ''; // クリア
+    thumbnailContainer.innerHTML = ''; // サムネイルクリア
 
     for (let num = 1; num <= pdfDoc.numPages; num++) {
         // コンテナ作成
         const pageContainer = document.createElement('div');
         pageContainer.className = 'page-container';
         pageContainer.id = `page-container-${num}`;
+        pageContainer.style.position = 'relative'; // 追加: SVGとFabricを重ねるため
         
-        const pdfCanvasEl = document.createElement('canvas');
-        pdfCanvasEl.className = 'pdf-canvas';
+        const svgContainerEl = document.createElement('div');
+        svgContainerEl.className = 'pdf-svg-container';
+        svgContainerEl.style.position = 'absolute';
+        svgContainerEl.style.top = '0';
+        svgContainerEl.style.left = '0';
+        svgContainerEl.style.zIndex = '1';
         
         const fabCanvasEl = document.createElement('canvas');
         fabCanvasEl.id = `fabric-canvas-${num}`;
+        // Fabric.jsのコンテナが自動生成されるが、その親であるpageContainerのpositionを基準にする
         
-        pageContainer.appendChild(pdfCanvasEl);
+        pageContainer.appendChild(svgContainerEl);
         pageContainer.appendChild(fabCanvasEl);
         zoomWrapper.appendChild(pageContainer);
 
@@ -125,19 +212,51 @@ const renderAllPages = async () => {
 
         pageContainer.style.width = `${viewport.width}px`;
         pageContainer.style.height = `${viewport.height}px`;
-        pdfCanvasEl.width = viewport.width;
-        pdfCanvasEl.height = viewport.height;
+        
+        svgContainerEl.style.width = `${viewport.width}px`;
+        svgContainerEl.style.height = `${viewport.height}px`;
 
-        // PDF描画
-        const ctx = pdfCanvasEl.getContext('2d');
-        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        // --- SVGレンダリング ---
+        // Canvasの代わりに完全なベクターデータ(SVG)としてPDFを描画する
+        const operatorList = await page.getOperatorList();
+        const svgGfx = new pdfjsLib.SVGGraphics(page.commonObjs, page.objs);
+        const svgElement = await svgGfx.getSVG(operatorList, viewport);
+        
+        svgContainerEl.appendChild(svgElement);
 
-        // Fabric初期化
+        // --- サムネイル生成 ---
+        const thumbWrapper = document.createElement('div');
+        thumbWrapper.className = 'thumbnail-wrapper';
+        thumbWrapper.onclick = () => jumpToPage(num);
+        
+        const thumbCanvas = document.createElement('canvas');
+        const thumbViewport = page.getViewport({ scale: 0.2 }); // 縮小版
+        thumbCanvas.width = thumbViewport.width;
+        thumbCanvas.height = thumbViewport.height;
+        const thumbCtx = thumbCanvas.getContext('2d');
+        await page.render({ canvasContext: thumbCtx, viewport: thumbViewport }).promise;
+        
+        const thumbLabel = document.createElement('div');
+        thumbLabel.className = 'thumbnail-page-num';
+        thumbLabel.textContent = `Page ${num}`;
+        
+        thumbWrapper.appendChild(thumbCanvas);
+        thumbWrapper.appendChild(thumbLabel);
+        thumbnailContainer.appendChild(thumbWrapper);
+
+        // --- Fabric初期化 ---
+        // ※以前ボタン高画質化のために devicePixelRatio = 3 としていたが、
+        // これによりペンツールの描画負荷が跳ね上がり（面積9倍の計算）、遅延の原因となっていたため元に戻す。
         const fabCanvas = new fabric.Canvas(`fabric-canvas-${num}`, {
             selection: false,
             width: viewport.width,
             height: viewport.height
         });
+        
+        // ブラシ初期設定
+        fabCanvas.freeDrawingBrush.color = currentPenColor;
+        fabCanvas.freeDrawingBrush.width = currentPenWidth;
+
         fabricCanvases[num] = fabCanvas;
 
         // 保存データがあれば復元
@@ -155,7 +274,6 @@ const renderAllPages = async () => {
     }
     setMode(MODES.VIEW); // 初期モード適用
     
-    // PDF外側もパンできるように設けた巨大なパディング（3000px）を考慮して初期スクロールする
     setTimeout(() => {
         const firstPage = document.querySelector('.page-container');
         const pdfWidth = firstPage ? firstPage.clientWidth : 800;
@@ -171,6 +289,73 @@ const renderAllPages = async () => {
         container.scrollTop = centerY - 50; // 上部に少し余裕を持たせる
     }, 100);
 };
+
+// --- ナビゲーション機能 ---
+const jumpToPage = (pageNum) => {
+    const pageEl = document.getElementById(`page-container-${pageNum}`);
+    if (!pageEl) return;
+    
+    // スケールを考慮した要素の中心座標を計算
+    const rect = pageEl.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    
+    // 現在のスクロール位置 + 要素の相対位置
+    const targetTop = (pageEl.offsetTop * currentZoom) + 250 - 50; // 250はzoom-wrapperのオフセット、50は余白
+    
+    container.scrollTo({
+        top: targetTop,
+        behavior: 'smooth'
+    });
+    
+    currentPageInput.value = pageNum;
+    if (!sidebar.classList.contains('sidebar-hidden')) {
+        sidebar.classList.add('sidebar-hidden');
+    }
+};
+
+btnToggleSidebar.addEventListener('click', () => {
+    sidebar.classList.toggle('sidebar-hidden');
+});
+
+btnCloseSidebar.addEventListener('click', () => {
+    sidebar.classList.add('sidebar-hidden');
+});
+
+currentPageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        let val = parseInt(currentPageInput.value, 10);
+        if (isNaN(val) || val < 1) val = 1;
+        if (pdfDoc && val > pdfDoc.numPages) val = pdfDoc.numPages;
+        currentPageInput.value = val;
+        jumpToPage(val);
+    }
+});
+
+// スクロール時の現在ページ追従
+let scrollTimeout = null;
+container.addEventListener('scroll', () => {
+    if (!pdfDoc) return;
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    
+    scrollTimeout = setTimeout(() => {
+        let minDiff = Infinity;
+        let closestPage = 1;
+        const containerCenterY = container.scrollTop + container.clientHeight / 2;
+        
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const pageEl = document.getElementById(`page-container-${i}`);
+            if (pageEl) {
+                const pageCenterY = (pageEl.offsetTop * currentZoom) + 250 + ((pageEl.clientHeight * currentZoom) / 2);
+                const diff = Math.abs(containerCenterY - pageCenterY);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestPage = i;
+                }
+            }
+        }
+        currentPageInput.value = closestPage;
+    }, 100);
+});
 
 // --- Fabric.js イベント ---
 let isErasing = false;
@@ -256,6 +441,9 @@ let velocityY = 0;
 let lastTouchTime = 0;
 let momentumId = null;
 
+// ズーム更新の最適化（ガクツキ防止）
+let isZoomTicking = false;
+
 const updateZoom = (newZoom) => {
     currentZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
     zoomWrapper.style.transform = `scale(${currentZoom})`;
@@ -275,7 +463,7 @@ const getCenter = (touches) => {
     };
 };
 
-const container = document.getElementById('canvas-container');
+
 
 container.addEventListener('touchstart', (e) => {
     // 慣性スクロール中なら停止
@@ -287,6 +475,7 @@ container.addEventListener('touchstart', (e) => {
     if (e.touches.length >= 2) {
         isPinching = true;
         isPanning = false;
+        zoomWrapper.classList.add('fast-zoom'); // ズーム中はGPUキャッシュを使用して軽くする
         initialDistance = getDistance(e.touches);
         initialZoom = currentZoom;
         lastCenter = getCenter(e.touches);
@@ -342,7 +531,14 @@ container.addEventListener('touchmove', (e) => {
             container.scrollLeft = (originX + newDistX) - relX;
             container.scrollTop = (originY + newDistY) - relY;
             
-            updateZoom(clampedZoom);
+            // ズーム描画の間引き（GPU負荷軽減）
+            if (!isZoomTicking) {
+                requestAnimationFrame(() => {
+                    updateZoom(clampedZoom);
+                    isZoomTicking = false;
+                });
+                isZoomTicking = true;
+            }
         }
         
         // パン（平行移動）処理
@@ -379,7 +575,10 @@ container.addEventListener('touchmove', (e) => {
 
 container.addEventListener('touchend', (e) => {
     if (e.touches.length < 2) {
-        isPinching = false;
+        if (isPinching) {
+            isPinching = false;
+            zoomWrapper.classList.remove('fast-zoom'); // ズーム終了時に高画質ベクターの再計算を許可
+        }
         // モード復帰
         Object.values(fabricCanvases).forEach(c => {
             if (c.__wasDrawingMode) {
@@ -410,10 +609,19 @@ container.addEventListener('touchend', (e) => {
     }
 });
 
+let wheelZoomTimeout = null;
+
 // PC用 ホイールズーム
 container.addEventListener('wheel', (e) => {
     if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        zoomWrapper.classList.add('fast-zoom'); // ズーム開始
+        
+        clearTimeout(wheelZoomTimeout);
+        wheelZoomTimeout = setTimeout(() => {
+            zoomWrapper.classList.remove('fast-zoom'); // ズーム完了後に高画質化
+        }, 150);
+        
         const delta = e.deltaY > 0 ? -0.1 : 0.1;
         const oldZoom = currentZoom;
         const newZoom = currentZoom + delta;
@@ -439,7 +647,13 @@ container.addEventListener('wheel', (e) => {
             container.scrollLeft = (originX + newDistX) - relX;
             container.scrollTop = (originY + newDistY) - relY;
             
-            updateZoom(clampedZoom);
+            if (!isZoomTicking) {
+                requestAnimationFrame(() => {
+                    updateZoom(clampedZoom);
+                    isZoomTicking = false;
+                });
+                isZoomTicking = true;
+            }
         }
     }
 }, { passive: false });
@@ -526,6 +740,7 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
         
         const text = new fabric.Text(labelText, {
             fontSize: 16, fill: '#ffffff', fontWeight: 'bold',
+            fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
             originX: 'center', originY: 'center', textAlign: 'center'
         });
         
