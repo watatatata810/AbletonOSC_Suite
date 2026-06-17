@@ -563,6 +563,11 @@ container.addEventListener('touchstart', (e) => {
             if (c.isDrawingMode) {
                 c.isDrawingMode = false;
                 c.__wasDrawingMode = true;
+                
+                // 描画途中のトップコンテキストのインクを強制クリアして操作中のチラつきを防ぐ
+                if (c.contextTop) {
+                    c.clearContext(c.contextTop);
+                }
             }
         });
     } else if (e.touches.length === 1 && currentMode === MODES.VIEW) {
