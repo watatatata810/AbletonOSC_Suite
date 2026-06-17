@@ -101,8 +101,9 @@ const btnCtxDelete = document.getElementById('btn-ctx-delete');
 
 let contextTargetCanvasNum = null; // 現在メニューが表示されているキャンバスの番号
 let contextMenuTimeout = null;
-let pasteTouchStartCoords = null; // タップペースト判定用座標
-let pasteTouchCanceled = false; // タップペーストのキャンセルフラグ
+let pasteTouchStartCoords = null; // タップ判定用座標
+let pasteTouchCanceled = false; // タップのキャンセルフラグ
+let touchTargetObject = null; // タップした対象オブジェクト
 
 const hideContextMenu = () => {
     contextMenu.classList.remove('visible');
@@ -674,11 +675,22 @@ const setupFabricEvents = (canvas, pageNum) => {
         const e = options.e;
         const isMultiTouch = e.touches && e.touches.length > 1;
 
+        touchTargetObject = options.target;
+
         if (currentMode === MODES.SELECT && !options.target && !isPinching && !isMultiTouch) {
             // 他のキャンバスでメニューが出ていたら消す
             if (contextTargetCanvasNum && contextTargetCanvasNum !== pageNum) {
                 hideContextMenu();
             }
+            pasteTouchCanceled = false;
+            let clientX = e.clientX || 0;
+            let clientY = e.clientY || 0;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            }
+            pasteTouchStartCoords = { x: clientX, y: clientY };
+        } else if (currentMode === MODES.VIEW) {
             pasteTouchCanceled = false;
             let clientX = e.clientX || 0;
             let clientY = e.clientY || 0;
@@ -721,25 +733,6 @@ const setupFabricEvents = (canvas, pageNum) => {
                     socket.emit('get_session_data');
                 }
             }
-        } else if (currentMode === MODES.VIEW && options.target && options.target.isTrigger) {
-            // トリガー発火
-            if (options.target.isSceneTrigger) {
-                const s = options.target.sceneNum;
-                console.log(`OSC Fire Scene: Scene ${s}`);
-                socket.emit('fire_scene', { scene: s });
-            } else {
-                const t = options.target.trackNum;
-                const s = options.target.sceneNum;
-                console.log(`OSC Fire: Track ${t}, Scene ${s}`);
-                socket.emit('fire_clip', { track: t, scene: s });
-            }
-            
-            options.target.set('opacity', 0.5);
-            canvas.renderAll();
-            setTimeout(() => {
-                options.target.set('opacity', 1);
-                canvas.renderAll();
-            }, 200);
         } else if (currentMode === MODES.ERASER) {
             isErasing = true;
             if (options.target) canvas.remove(options.target);
@@ -774,7 +767,7 @@ const setupFabricEvents = (canvas, pageNum) => {
         // ペーストメニュー表示のタップ完了判定
         if (currentMode === MODES.SELECT && pasteTouchStartCoords && !pasteTouchCanceled && !isPinching) {
             // options.target が無く、かつ動いていない場合のみ表示
-            if (!options.target) {
+            if (!touchTargetObject) {
                 if (contextMenu.classList.contains('visible')) {
                     hideContextMenu();
                 } else {
@@ -782,8 +775,32 @@ const setupFabricEvents = (canvas, pageNum) => {
                 }
             }
         }
+        
+        // トリガー発火のタップ完了判定
+        if (currentMode === MODES.VIEW && touchTargetObject && touchTargetObject.isTrigger && !pasteTouchCanceled && !isPinching) {
+            if (touchTargetObject.isSceneTrigger) {
+                const s = touchTargetObject.sceneNum;
+                console.log(`OSC Fire Scene: Scene ${s}`);
+                socket.emit('fire_scene', { scene: s });
+            } else {
+                const t = touchTargetObject.trackNum;
+                const s = touchTargetObject.sceneNum;
+                console.log(`OSC Fire: Track ${t}, Scene ${s}`);
+                socket.emit('fire_clip', { track: t, scene: s });
+            }
+            
+            touchTargetObject.set('opacity', 0.5);
+            canvas.renderAll();
+            const targetRef = touchTargetObject;
+            setTimeout(() => {
+                if (targetRef) targetRef.set('opacity', 1);
+                canvas.renderAll();
+            }, 200);
+        }
+
         pasteTouchStartCoords = null;
         pasteTouchCanceled = false;
+        touchTargetObject = null;
 
         isErasing = false;
     });
