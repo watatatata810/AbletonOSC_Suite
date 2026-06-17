@@ -8,7 +8,7 @@ let fabricCanvases = {}; // pageNum(1-indexed) -> fabric.Canvas
 let currentPdfName = 'sample.pdf'; // サーバーから受け取るアクティブなPDF名
 const scale = 1.5;
 // 画質チューニング用係数 (1.0で標準, 1.5〜2.0で高画質化・メモリ消費増)
-const PDF_QUALITY_MULTIPLIER = 1.5;
+const PDF_QUALITY_MULTIPLIER = 1.7;
 
 // DOM
 const zoomWrapper = document.getElementById('zoom-wrapper');
