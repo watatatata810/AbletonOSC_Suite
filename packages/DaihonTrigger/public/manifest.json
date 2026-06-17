@@ -1,0 +1,8 @@
+{
+  "name": "台本ポン出しトリガー",
+  "short_name": "台本トリガー",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#2c2c2e",
+  "theme_color": "#2c2c2e"
+}
