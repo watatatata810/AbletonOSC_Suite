@@ -106,7 +106,7 @@ if (btnResetContinuous) {
 }
 const updateContinuousStatusUI = () => {
     if (nextContinuousSceneIndex === null) {
-        continuousNextText.textContent = '次の配置: 未定';
+        continuousNextText.textContent = '次の配置: 未定（配置したい場所をクリック）';
     } else {
         continuousNextText.textContent = `次の配置: Scene ${nextContinuousSceneIndex + 1}`;
     }
@@ -875,7 +875,8 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
     saveCurrentPage(pendingTriggerPage);
     
     document.getElementById('trigger-modal').classList.add('hidden');
-    setMode(MODES.VIEW);
+    // 配置後もトリガーモードを維持するため、閲覧モードへの自動遷移を削除
+    // setMode(MODES.VIEW);
 };
 
 // --- 初期化フロー ---
