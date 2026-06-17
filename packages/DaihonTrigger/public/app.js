@@ -108,7 +108,11 @@ const updateContinuousStatusUI = () => {
     if (nextContinuousSceneIndex === null) {
         continuousNextText.textContent = '次の配置: 未定（配置したい場所をクリック）';
     } else {
-        continuousNextText.textContent = `次の配置: Scene ${nextContinuousSceneIndex + 1}`;
+        let displayName = `Scene ${nextContinuousSceneIndex + 1}`;
+        if (cachedSessionData && cachedSessionData.scenes && cachedSessionData.scenes[nextContinuousSceneIndex]) {
+            displayName = cachedSessionData.scenes[nextContinuousSceneIndex].name || displayName;
+        }
+        continuousNextText.textContent = `次の配置: ${displayName}`;
     }
 };
 
