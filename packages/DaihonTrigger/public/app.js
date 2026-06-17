@@ -254,6 +254,8 @@ const modeBtns = {
 };
 
 const setMode = (mode) => {
+    hideContextMenu(); // モードを切り替えたらコンテキストメニューを閉じる
+    
     currentMode = mode;
     Object.values(modeBtns).forEach(btn => btn.classList.remove('active'));
     
