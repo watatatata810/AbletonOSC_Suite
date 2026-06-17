@@ -7,6 +7,8 @@ let pagesData = {};
 let fabricCanvases = {}; // pageNum(1-indexed) -> fabric.Canvas
 let currentPdfName = 'sample.pdf'; // サーバーから受け取るアクティブなPDF名
 const scale = 1.5;
+// 画質チューニング用係数 (1.0で標準, 1.5〜2.0で高画質化・メモリ消費増)
+const PDF_QUALITY_MULTIPLIER = 1.5;
 
 // DOM
 const zoomWrapper = document.getElementById('zoom-wrapper');
@@ -364,7 +366,8 @@ const renderAllPages = async () => {
         
         // --- 高解像度Canvasレンダリング (SVGの代わり) ---
         // iOS等で複雑なPDFをSVG化すると処理落ちや描画失敗が起きるためCanvasを使用
-        const dpr = window.devicePixelRatio || 1;
+        // チューニング係数(PDF_QUALITY_MULTIPLIER)を掛けて内部解像度をさらに高くする
+        const dpr = (window.devicePixelRatio || 1) * PDF_QUALITY_MULTIPLIER;
         renderCanvasEl.width = viewport.width * dpr;
         renderCanvasEl.height = viewport.height * dpr;
         renderCanvasEl.style.width = `${viewport.width}px`;
