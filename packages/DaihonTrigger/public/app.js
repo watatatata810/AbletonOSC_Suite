@@ -253,18 +253,17 @@ const renderAllPages = async () => {
         pageContainer.id = `page-container-${num}`;
         pageContainer.style.position = 'relative'; // 追加: SVGとFabricを重ねるため
         
-        const svgContainerEl = document.createElement('div');
-        svgContainerEl.className = 'pdf-svg-container';
-        svgContainerEl.style.position = 'absolute';
-        svgContainerEl.style.top = '0';
-        svgContainerEl.style.left = '0';
-        svgContainerEl.style.zIndex = '1';
+        const renderCanvasEl = document.createElement('canvas');
+        renderCanvasEl.className = 'pdf-render-canvas';
+        renderCanvasEl.style.position = 'absolute';
+        renderCanvasEl.style.top = '0';
+        renderCanvasEl.style.left = '0';
+        renderCanvasEl.style.zIndex = '1';
         
         const fabCanvasEl = document.createElement('canvas');
         fabCanvasEl.id = `fabric-canvas-${num}`;
-        // Fabric.jsのコンテナが自動生成されるが、その親であるpageContainerのpositionを基準にする
         
-        pageContainer.appendChild(svgContainerEl);
+        pageContainer.appendChild(renderCanvasEl);
         pageContainer.appendChild(fabCanvasEl);
         zoomWrapper.appendChild(pageContainer);
 
@@ -274,16 +273,22 @@ const renderAllPages = async () => {
         pageContainer.style.width = `${viewport.width}px`;
         pageContainer.style.height = `${viewport.height}px`;
         
-        svgContainerEl.style.width = `${viewport.width}px`;
-        svgContainerEl.style.height = `${viewport.height}px`;
+        // --- 高解像度Canvasレンダリング (SVGの代わり) ---
+        // iOS等で複雑なPDFをSVG化すると処理落ちや描画失敗が起きるためCanvasを使用
+        const dpr = window.devicePixelRatio || 1;
+        renderCanvasEl.width = viewport.width * dpr;
+        renderCanvasEl.height = viewport.height * dpr;
+        renderCanvasEl.style.width = `${viewport.width}px`;
+        renderCanvasEl.style.height = `${viewport.height}px`;
 
-        // --- SVGレンダリング ---
-        // Canvasの代わりに完全なベクターデータ(SVG)としてPDFを描画する
-        const operatorList = await page.getOperatorList();
-        const svgGfx = new pdfjsLib.SVGGraphics(page.commonObjs, page.objs);
-        const svgElement = await svgGfx.getSVG(operatorList, viewport);
-        
-        svgContainerEl.appendChild(svgElement);
+        const ctx = renderCanvasEl.getContext('2d');
+        // 解像度に合わせてスケール調整
+        ctx.scale(dpr, dpr);
+
+        await page.render({
+            canvasContext: ctx,
+            viewport: viewport
+        }).promise;
 
         // --- サムネイル生成 ---
         const thumbWrapper = document.createElement('div');
