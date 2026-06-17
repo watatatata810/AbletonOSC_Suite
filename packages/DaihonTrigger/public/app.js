@@ -521,6 +521,8 @@ const setupFabricEvents = (canvas, pageNum) => {
     canvas.on('object:moving', (options) => {
         if (currentMode !== MODES.SELECT) return;
         
+        hideContextMenu(); // ドラッグ開始・移動中はコンテキストメニューを非表示にする
+        
         const obj = options.target;
         const e = options.e;
         let clientX = e.clientX;
