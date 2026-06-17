@@ -78,6 +78,20 @@ let isFetchingSessionData = false;
 let isContinuousMode = false;
 let nextContinuousSceneIndex = null;
 
+// --- ドラッグ用ゴースト要素の準備 ---
+const dragGhost = document.createElement('img');
+dragGhost.style.position = 'fixed';
+dragGhost.style.pointerEvents = 'none'; // マウスイベントを貫通させる
+dragGhost.style.zIndex = '9999';
+dragGhost.style.display = 'none';
+dragGhost.style.opacity = '0.7'; // ちょっと半透明にする
+document.body.appendChild(dragGhost);
+
+let activeDragObject = null;
+let activeDragStartCanvasNum = null;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
 const triggerSettingsPanel = document.getElementById('trigger-settings');
 const continuousModeCheckbox = document.getElementById('continuous-trigger-mode');
 const continuousStatusContainer = document.getElementById('continuous-status-container');
@@ -442,7 +456,115 @@ const setupFabricEvents = (canvas, pageNum) => {
         }
     });
 
-    canvas.on('object:modified', () => saveCurrentPage(pageNum));
+    canvas.on('object:modified', () => {
+        // 同じページ内での移動やリサイズが確定した場合のみ保存する（別ページ移動時はmouse:upで処理）
+        if (!activeDragObject) {
+            saveCurrentPage(pageNum);
+        }
+    });
+    
+    // ドラッグ移動中（ゴーストの追従）
+    canvas.on('object:moving', (options) => {
+        if (currentMode !== MODES.SELECT) return;
+        
+        const obj = options.target;
+        const e = options.e;
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        if (dragGhost.style.display === 'none') {
+            activeDragObject = obj;
+            activeDragStartCanvasNum = pageNum;
+            
+            // オブジェクトの見た目を画像化
+            const dataUrl = obj.toDataURL({ format: 'png' });
+            dragGhost.src = dataUrl;
+            dragGhost.style.display = 'block';
+            
+            // ズームを加味したゴーストのサイズ設定
+            const bound = obj.getBoundingRect();
+            dragGhost.style.width = `${bound.width}px`;
+            dragGhost.style.height = `${bound.height}px`;
+            
+            // マウスカーソルに対するオフセット
+            dragOffsetX = clientX - bound.left;
+            dragOffsetY = clientY - bound.top;
+            
+            obj.set('opacity', 0.2); // 元のオブジェクトを半透明に
+        }
+
+        // ゴーストの位置を更新
+        if (dragGhost.style.display === 'block') {
+            dragGhost.style.left = `${clientX - dragOffsetX}px`;
+            dragGhost.style.top = `${clientY - dragOffsetY}px`;
+        }
+    });
+
+    // マウスアップ時のドロップ処理
+    canvas.on('mouse:up', (options) => {
+        if (activeDragObject && dragGhost.style.display === 'block') {
+            const e = options.e;
+            let clientX = e.clientX || 0;
+            let clientY = e.clientY || 0;
+            if (e.changedTouches && e.changedTouches.length > 0) {
+                clientX = e.changedTouches[0].clientX;
+                clientY = e.changedTouches[0].clientY;
+            }
+            
+            dragGhost.style.display = 'none';
+            activeDragObject.set('opacity', 1);
+            
+            // どのキャンバス(ページ)にドロップされたかを判定
+            let targetPageNum = null;
+            const containers = document.querySelectorAll('.page-container');
+            containers.forEach((container, index) => {
+                const rect = container.getBoundingClientRect();
+                if (clientX >= rect.left && clientX <= rect.right &&
+                    clientY >= rect.top && clientY <= rect.bottom) {
+                    targetPageNum = index + 1; // 1始まり
+                }
+            });
+
+            if (targetPageNum && targetPageNum !== pageNum) {
+                const targetCanvas = fabricCanvases[targetPageNum];
+                if (targetCanvas) {
+                    const targetContainer = document.getElementById(`page-container-${targetPageNum}`);
+                    const targetRect = targetContainer.getBoundingClientRect();
+                    
+                    const ghostLeft = parseFloat(dragGhost.style.left);
+                    const ghostTop = parseFloat(dragGhost.style.top);
+                    
+                    // 新しいキャンバス内の論理座標（現在のズームを考慮）
+                    const newLeft = (ghostLeft - targetRect.left) / currentZoom;
+                    const newTop = (ghostTop - targetRect.top) / currentZoom;
+                    
+                    // プロパティを複製して別キャンバスに追加
+                    activeDragObject.clone((clonedObj) => {
+                        clonedObj.set({ left: newLeft, top: newTop });
+                        targetCanvas.add(clonedObj);
+                        canvas.remove(activeDragObject);
+                        
+                        saveCurrentPage(pageNum);
+                        saveCurrentPage(targetPageNum);
+                        
+                        activeDragObject = null;
+                        activeDragStartCanvasNum = null;
+                    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
+                    return; // cloneは非同期なのでここで抜ける
+                }
+            } else {
+                saveCurrentPage(pageNum);
+            }
+            
+            activeDragObject = null;
+            activeDragStartCanvasNum = null;
+        }
+    });
     
     // 消しゴム等で消えた後に保存
     canvas.on('object:removed', () => {
