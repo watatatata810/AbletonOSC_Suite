@@ -142,10 +142,14 @@ const setMode = (mode) => {
     else if (mode === MODES.ERASER) modeBtns.eraser.classList.add('active');
     else if (mode === MODES.TRIGGER) modeBtns.trigger.classList.add('active');
 
-    // ペンモードの時だけペン設定パネルを表示（アニメーション付きアコーディオン）
+    // ペン設定パネルの表示切替
     if (mode === MODES.DRAW) {
+        // ペンモード時は必ず表示
         penSettingsPanel.classList.remove('pen-settings-hidden');
+    } else if (mode === MODES.ERASER) {
+        // 消しゴムモード時は、ペン作業中の連続性を考慮して「現状維持」とする（何もしない）
     } else {
+        // 閲覧、トリガー等のモード時は非表示にする
         penSettingsPanel.classList.add('pen-settings-hidden');
     }
 
