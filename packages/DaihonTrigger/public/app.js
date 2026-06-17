@@ -73,6 +73,45 @@ let currentMode = MODES.VIEW;
 let pendingTriggerPos = null;
 let pendingTriggerPage = null;
 
+let cachedSessionData = null;
+let isFetchingSessionData = false;
+let isContinuousMode = false;
+let nextContinuousSceneIndex = null;
+
+const triggerSettingsPanel = document.getElementById('trigger-settings');
+const continuousModeCheckbox = document.getElementById('continuous-trigger-mode');
+const continuousStatusContainer = document.getElementById('continuous-status-container');
+const continuousNextText = document.getElementById('continuous-next-text');
+const btnResetContinuous = document.getElementById('btn-reset-continuous');
+const modalWarning = document.getElementById('modal-warning');
+const btnUpdateSession = document.getElementById('btn-update-session');
+
+if (continuousModeCheckbox) {
+    continuousModeCheckbox.addEventListener('change', (e) => {
+        isContinuousMode = e.target.checked;
+        if (isContinuousMode) {
+            continuousStatusContainer.style.display = 'flex';
+            updateContinuousStatusUI();
+        } else {
+            continuousStatusContainer.style.display = 'none';
+            nextContinuousSceneIndex = null;
+        }
+    });
+}
+if (btnResetContinuous) {
+    btnResetContinuous.addEventListener('click', () => {
+        nextContinuousSceneIndex = null;
+        updateContinuousStatusUI();
+    });
+}
+const updateContinuousStatusUI = () => {
+    if (nextContinuousSceneIndex === null) {
+        continuousNextText.textContent = '次の配置: 未定';
+    } else {
+        continuousNextText.textContent = `次の配置: Scene ${nextContinuousSceneIndex + 1}`;
+    }
+};
+
 // ペン設定
 let currentPenColor = 'rgba(255, 0, 0, 0.7)'; // 初期値: 赤
 let currentPenWidth = 3;
@@ -142,15 +181,21 @@ const setMode = (mode) => {
     else if (mode === MODES.ERASER) modeBtns.eraser.classList.add('active');
     else if (mode === MODES.TRIGGER) modeBtns.trigger.classList.add('active');
 
-    // ペン設定パネルの表示切替
+    // 設定パネルの表示切替
     if (mode === MODES.DRAW) {
-        // ペンモード時は必ず表示
         penSettingsPanel.classList.remove('pen-settings-hidden');
+        if(triggerSettingsPanel) triggerSettingsPanel.classList.add('pen-settings-hidden');
     } else if (mode === MODES.ERASER) {
-        // 消しゴムモード時は、ペン作業中の連続性を考慮して「現状維持」とする（何もしない）
-    } else {
-        // 閲覧、トリガー等のモード時は非表示にする
+    } else if (mode === MODES.TRIGGER) {
         penSettingsPanel.classList.add('pen-settings-hidden');
+        if(triggerSettingsPanel) triggerSettingsPanel.classList.remove('pen-settings-hidden');
+        if (!isFetchingSessionData) {
+            isFetchingSessionData = true;
+            socket.emit('get_session_data');
+        }
+    } else {
+        penSettingsPanel.classList.add('pen-settings-hidden');
+        if(triggerSettingsPanel) triggerSettingsPanel.classList.add('pen-settings-hidden');
     }
 
     // 全キャンバスの設定を更新
@@ -387,13 +432,34 @@ const setupFabricEvents = (canvas, pageNum) => {
         }
 
         if (currentMode === MODES.TRIGGER && !options.target) {
-            // 新規トリガー配置
             pendingTriggerPos = canvas.getPointer(options.e);
             pendingTriggerPage = pageNum;
-            document.getElementById('trigger-modal').classList.remove('hidden');
-            document.getElementById('modal-loading').classList.remove('hidden');
-            document.getElementById('modal-grid-container').classList.add('hidden');
-            socket.emit('get_session_data');
+            
+            if (isContinuousMode && nextContinuousSceneIndex !== null) {
+                placeTrigger(null, nextContinuousSceneIndex, null, true);
+                nextContinuousSceneIndex++;
+                updateContinuousStatusUI();
+                return;
+            }
+
+            const triggerModal = document.getElementById('trigger-modal');
+            const modalLoading = document.getElementById('modal-loading');
+            const gridContainer = document.getElementById('modal-grid-container');
+            
+            triggerModal.classList.remove('hidden');
+            
+            if (cachedSessionData) {
+                modalLoading.style.display = 'none';
+                gridContainer.classList.remove('hidden');
+                renderSessionGrid(cachedSessionData);
+            } else {
+                modalLoading.style.display = 'block';
+                gridContainer.classList.add('hidden');
+                if (!isFetchingSessionData) {
+                    isFetchingSessionData = true;
+                    socket.emit('get_session_data');
+                }
+            }
         } else if (currentMode === MODES.VIEW && options.target && options.target.isTrigger) {
             // トリガー発火
             if (options.target.isSceneTrigger) {
@@ -664,67 +730,104 @@ container.addEventListener('wheel', (e) => {
 
 
 // --- セッションデータ・モーダル関連 ---
-socket.on('session_data_result', (data) => {
-    document.getElementById('modal-loading').classList.add('hidden');
-    
-    if (data.error) {
-        alert("セッションデータの取得に失敗しました。Ableton Liveとosc-routerが起動しているか確認してください。");
-        document.getElementById('trigger-modal').classList.add('hidden');
-        return;
-    }
-    
-    document.getElementById('modal-grid-container').classList.remove('hidden');
-    
+const renderSessionGrid = (data) => {
     const thead = document.getElementById('session-grid-head');
     const tbody = document.getElementById('session-grid-body');
     thead.innerHTML = ''; tbody.innerHTML = '';
     
     const trHead = document.createElement('tr');
-    
-    // トラック見出しを先に並べる
     data.tracks.forEach(t => {
         const th = document.createElement('th');
         th.textContent = t.name;
         trHead.appendChild(th);
     });
     
-    // 右端にシーン用見出しを追加
     const thScenes = document.createElement('th');
     thScenes.textContent = 'Scenes';
     trHead.appendChild(thScenes);
-    
     thead.appendChild(trHead);
     
     data.scenes.forEach(s => {
         const tr = document.createElement('tr');
-        
-        // クリップセルを先に並べる
         data.tracks.forEach(t => {
             const td = document.createElement('td');
             const clipName = data.clips[t.index][s.index];
             td.textContent = clipName ? clipName : '';
             td.className = clipName ? 'clip-cell' : 'clip-cell empty-clip';
-            
-            // ボタン（トリガー）のラベルは常にシーン名を使用する
-            td.onclick = () => placeTrigger(t.index, s.index, s.name);
+            td.onclick = () => {
+                const warn = document.getElementById('modal-warning');
+                if (warn && !warn.classList.contains('hidden')) return;
+                placeTrigger(t.index, s.index, s.name);
+            };
             tr.appendChild(td);
         });
 
-        // 右端にシーン名を追加
         const tdScene = document.createElement('td');
         tdScene.textContent = s.name;
         tdScene.style.cursor = 'pointer';
         tdScene.className = 'scene-cell';
-        tdScene.onclick = () => placeTrigger(null, s.index, s.name, true);
+        tdScene.onclick = () => {
+            const warn = document.getElementById('modal-warning');
+            if (warn && !warn.classList.contains('hidden')) return;
+            placeTrigger(null, s.index, s.name, true);
+        };
         tr.appendChild(tdScene);
-
         tbody.appendChild(tr);
     });
+};
+
+socket.on('session_data_result', (data) => {
+    isFetchingSessionData = false;
+    const modalLoading = document.getElementById('modal-loading');
+    const triggerModal = document.getElementById('trigger-modal');
+    
+    if (data.error) {
+        alert("セッションデータの取得に失敗しました。Ableton Liveとosc-routerが起動しているか確認してください。");
+        if(modalLoading) modalLoading.style.display = 'none';
+        if(triggerModal) triggerModal.classList.add('hidden');
+        return;
+    }
+    
+    const isModalOpen = triggerModal && !triggerModal.classList.contains('hidden');
+    const modalWarning = document.getElementById('modal-warning');
+    
+    if (cachedSessionData) {
+        const isChanged = (cachedSessionData.numScenes !== data.numScenes || cachedSessionData.numTracks !== data.numTracks);
+        if (isChanged && isModalOpen) {
+            if(modalWarning) modalWarning.classList.remove('hidden');
+            cachedSessionData.pendingUpdate = data;
+            return;
+        }
+    }
+    
+    cachedSessionData = data;
+    
+    if (isModalOpen && (!modalWarning || modalWarning.classList.contains('hidden'))) {
+        if(modalLoading) modalLoading.style.display = 'none';
+        document.getElementById('modal-grid-container').classList.remove('hidden');
+        renderSessionGrid(cachedSessionData);
+    }
 });
 
+const btnUpdateSessionLocal = document.getElementById('btn-update-session');
+if (btnUpdateSessionLocal) {
+    btnUpdateSessionLocal.addEventListener('click', () => {
+        if (cachedSessionData && cachedSessionData.pendingUpdate) {
+            cachedSessionData = cachedSessionData.pendingUpdate;
+        }
+        document.getElementById('modal-warning').classList.add('hidden');
+        document.getElementById('modal-loading').style.display = 'none';
+        document.getElementById('modal-grid-container').classList.remove('hidden');
+        renderSessionGrid(cachedSessionData);
+    });
+}
+
 document.getElementById('modal-refresh').addEventListener('click', () => {
-    document.getElementById('modal-loading').classList.remove('hidden');
     document.getElementById('modal-grid-container').classList.add('hidden');
+    document.getElementById('modal-loading').style.display = 'block';
+    const warn = document.getElementById('modal-warning');
+    if(warn) warn.classList.add('hidden');
+    isFetchingSessionData = true;
     socket.emit('get_session_data');
 });
 
@@ -733,34 +836,43 @@ document.getElementById('modal-cancel').addEventListener('click', () => {
 });
 
 const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
-    if (pendingTriggerPos && pendingTriggerPage) {
-        const canvas = fabricCanvases[pendingTriggerPage];
-        
-        const rect = new fabric.Rect({
-            width: 140, height: 50, fill: isScene ? '#007aff' : '#ff2d55', rx: 10, ry: 10,
-            originX: 'center', originY: 'center',
-            shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 5, offsetX: 2, offsetY: 2 })
-        });
-        
-        const text = new fabric.Text(labelText, {
-            fontSize: 16, fill: '#ffffff', fontWeight: 'bold',
-            fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
-            originX: 'center', originY: 'center', textAlign: 'center'
-        });
-        
-        const group = new fabric.Group([rect, text], {
-            left: pendingTriggerPos.x, top: pendingTriggerPos.y,
-            originX: 'center', originY: 'center',
-            hasControls: true, hasBorders: true,
-            isTrigger: true,
-            isSceneTrigger: isScene,
-            trackNum: isScene ? null : trackIndex + 1,
-            sceneNum: sceneIndex + 1
-        });
-        
-        canvas.add(group);
-        saveCurrentPage(pendingTriggerPage);
+    if (!pendingTriggerPos || pendingTriggerPage === null) return;
+    
+    if (!labelText && cachedSessionData && cachedSessionData.scenes[sceneIndex]) {
+        labelText = cachedSessionData.scenes[sceneIndex].name;
     }
+
+    if (isContinuousMode && isScene) {
+        nextContinuousSceneIndex = sceneIndex + 1;
+        updateContinuousStatusUI();
+    }
+
+    const canvas = fabricCanvases[pendingTriggerPage];
+    
+    const rect = new fabric.Rect({
+        width: 140, height: 50, fill: isScene ? '#007aff' : '#ff2d55', rx: 10, ry: 10,
+        originX: 'center', originY: 'center',
+        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 5, offsetX: 2, offsetY: 2 })
+    });
+    
+    const text = new fabric.Text(labelText, {
+        fontSize: 16, fill: '#ffffff', fontWeight: 'bold',
+        fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
+        originX: 'center', originY: 'center', textAlign: 'center'
+    });
+    
+    const group = new fabric.Group([rect, text], {
+        left: pendingTriggerPos.x, top: pendingTriggerPos.y,
+        originX: 'center', originY: 'center',
+        hasControls: true, hasBorders: true,
+        isTrigger: true,
+        isSceneTrigger: isScene,
+        trackNum: isScene ? null : trackIndex + 1,
+        sceneNum: sceneIndex + 1
+    });
+    
+    canvas.add(group);
+    saveCurrentPage(pendingTriggerPage);
     
     document.getElementById('trigger-modal').classList.add('hidden');
     setMode(MODES.VIEW);
