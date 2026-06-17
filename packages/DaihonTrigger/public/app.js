@@ -665,12 +665,14 @@ const setupFabricEvents = (canvas, pageNum) => {
 
     // マウスダウン・タッチイベント
     canvas.on('mouse:down', (options) => {
-        if (currentMode === MODES.SELECT && !options.target) {
+        const e = options.e;
+        const isMultiTouch = e.touches && e.touches.length > 1;
+
+        if (currentMode === MODES.SELECT && !options.target && !isPinching && !isMultiTouch) {
             // 他のキャンバスでメニューが出ていたら消す
             if (contextTargetCanvasNum && contextTargetCanvasNum !== pageNum) {
                 hideContextMenu();
             }
-            const e = options.e;
             let clientX = e.clientX || 0;
             let clientY = e.clientY || 0;
             if (e.touches && e.touches.length > 0) {
