@@ -71,7 +71,7 @@ document.getElementById('btn-undo').addEventListener('click', undo);
 
 // モード管理
 const MODES = { VIEW: 'view', SELECT: 'select', DRAW: 'draw', ERASER: 'eraser', TRIGGER: 'trigger' };
-let currentMode = MODES.VIEW;
+let currentMode = MODES.SELECT;
 let pendingTriggerPos = null;
 let pendingTriggerPage = null;
 
@@ -355,7 +355,7 @@ const renderAllPages = async () => {
         pageContainer.style.height = `${viewport.height}px`;
         
         if (num === 1) {
-            setMode(MODES.VIEW); // 初期モード適用
+            setMode(MODES.SELECT); // 初期モード適用
             // 最初のページの幅が確定した直後にスクロール位置をリセットする
             const scaledPdfWidth = viewport.width * currentZoom;
             const centerX = 250 + (scaledPdfWidth / 2);
@@ -1080,7 +1080,7 @@ container.addEventListener('touchend', (e) => {
                     container.scrollTop -= velocityY * 16;
                     
                     // 摩擦で速度を減衰させる（1に近いほどよく滑る）
-                    velocityX *= 0.96; // 0.92 から 0.96 に変更し、より滑るように
+                    velocityX *= 0.50; 
                     velocityY *= 0.96;
                     
                     momentumId = requestAnimationFrame(applyMomentum);
