@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Ableton Waves</title>
+    <style>
+      body {
+        background-color: #2b2b2b;
+        color: #aaaaaa;
+        font-family: sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+      .loader {
+        text-align: center;
+      }
+      .spinner {
+        display: inline-block;
+        width: 30px;
+        height: 30px;
+        border: 3px solid rgba(255,255,255,.3);
+        border-radius: 50%;
+        border-top-color: #ff9800;
+        animation: spin 1s ease-in-out infinite;
+        margin-bottom: 10px;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loader">
+      <div class="spinner"></div>
+      <div id="status">サーバーの起動を待機中...</div>
+    </div>
+    
+    <script>
+      const checkServer = () => {
+        // Expressサーバーが立ち上がるまでポーリングし続ける
+        fetch('http://localhost:3000/')
+          .then(res => {
+            if (res.ok) {
+              // サーバーが応答したら、実際の画面へリダイレクト
+              window.location.replace('http://localhost:3000');
+            } else {
+              setTimeout(checkServer, 200);
+            }
+          })
+          .catch(() => {
+            setTimeout(checkServer, 200);
+          });
+      };
+      
+      // 0.2秒ごとに接続を試行
+      setTimeout(checkServer, 200);
+    </script>
+  </body>
+</html>

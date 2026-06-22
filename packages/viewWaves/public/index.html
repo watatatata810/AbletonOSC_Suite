@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ableton Live Waveform Viewer</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div id="settings-panel">
+            <button id="sync-button" style="width: 100%; margin-bottom: 15px; font-size: 14px;">🔄 状態を強制同期</button>
+            <label for="latency-slider">
+                ラグ補正 (Latency Compensation): <span id="latency-value">0</span> ms
+            </label>
+            <br>
+            <input type="range" id="latency-slider" min="0" max="2000" value="0" step="10">
+            
+            <div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px;">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="clock-toggle" checked style="cursor: pointer;">
+                    デジタル時計を表示
+                </label>
+            </div>
+        </div>
+        
+        <div id="digital-clock" class="digital-clock">00:00:00</div>
+
+        <!-- Header was removed for cleaner UI -->
+        <div id="empty-state-message" class="empty-state-message">
+            Play a clip to display waveforms...
+        </div>
+        <main id="waveforms-container">
+            <!-- 波形は再生が開始されたトラックから自動的に追加されます -->
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

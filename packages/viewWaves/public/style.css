@@ -1,0 +1,281 @@
+:root {
+    --bg-color: #1e1e1e;
+    --panel-bg: #2d2d2d;
+    --text-color: #e0e0e0;
+    --accent-color: #ff9800;
+    --border-color: #444;
+}
+
+html {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    box-sizing: border-box;
+    height: 100vh;
+    border: 4px solid #444; /* Default/Loading border */
+    transition: border-color 0.5s ease, background-color 0.5s ease;
+    overflow: hidden;
+}
+
+/* Status representation via borders and background */
+body.status-waiting {
+    border-color: #4caf50; /* Green: Connected & Waiting */
+}
+
+body.status-disconnected {
+    border-color: #f44336; /* Red: Disconnected */
+    background-color: #2a1111;
+}
+
+.container {
+    width: 100%;
+    max-width: 1200px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 10px 5px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+#settings-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    /* 隠し機能のトリガー領域（普段は完全に透明） */
+    width: 20px;
+    height: 20px;
+    overflow: hidden;
+    background: transparent;
+    padding: 0;
+    color: transparent;
+    font-size: 12px;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+#settings-panel:hover {
+    /* 右上カドにマウスを乗せた時だけ展開して表示 */
+    width: 260px;
+    height: auto;
+    padding: 15px;
+    opacity: 1;
+    color: #fff;
+    background: rgba(20, 20, 20, 0.95);
+    border-bottom-left-radius: 12px;
+    box-shadow: -2px 2px 10px rgba(0,0,0,0.8);
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#settings-panel input[type="range"] {
+    width: 100%;
+    margin-top: 8px;
+    cursor: pointer;
+}
+
+/* Header styles removed */
+
+.controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+input[type="text"] {
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    background-color: #121212;
+    color: white;
+    border-radius: 4px;
+    width: 150px;
+}
+
+button {
+    padding: 8px 16px;
+    background-color: var(--accent-color);
+    color: #121212;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: #e68900;
+}
+
+button:active {
+    transform: scale(0.96);
+}
+
+/* Status text styles removed */
+
+.track-box {
+    background-color: var(--panel-bg);
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    position: relative;
+    /* Animation initial states (hidden) */
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    padding-left: 5px;
+    padding-right: 5px;
+    overflow: hidden;
+    /* 表示時のフェードアニメーションを0.1秒に戻す */
+    transition: opacity 0.1s ease, max-height 0.1s ease, margin 0.1s ease, padding 0.1s ease;
+}
+
+.track-box.visible {
+    /* Animation active states (visible) */
+    opacity: 1;
+    max-height: 400px; /* sufficiently large for contents */
+    margin-bottom: 0;
+    padding-top: 20px;
+    padding-bottom: 10px;
+}
+
+/* 複数のトラックが表示される場合、2つ目以降の表示トラックの上にだけマージンをつける */
+.track-box.visible ~ .track-box.visible {
+    margin-top: 20px;
+}
+
+.track-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+    padding-left: 15px;
+    padding-right: 15px;
+}
+
+.track-title {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.track-info {
+    font-size: 14px;
+    color: #888;
+}
+
+.waveform {
+    position: relative;
+    width: 100%;
+    height: 128px;
+    background-color: #121212;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+/* WaveSurfer内部のカーソルが滑らかに動くアニメーション（早送りに見える原因）を無効化 */
+.waveform ::part(cursor) {
+    transition: none !important;
+}
+
+.empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #666;
+    font-style: italic;
+}
+
+
+.overlay-left, .overlay-right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 5;
+    pointer-events: none;
+    transition: width 0.3s ease-in-out;
+}
+
+.overlay-left {
+    left: 0;
+    width: 0%;
+}
+
+.overlay-right {
+    right: 0;
+    width: 0%;
+}
+
+#waveforms-container {
+    display: flex;
+    flex-direction: column;
+}
+
+.time-display {
+    text-align: right;
+    margin-top: 6px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.85);
+    pointer-events: none;
+    padding-right: 5px;
+}
+
+.empty-state-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 255, 255, 0.15);
+    font-size: 24px;
+    font-weight: bold;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+    text-align: center;
+    white-space: nowrap;
+    z-index: 1;
+}
+
+.empty-state-message.hidden {
+    opacity: 0;
+}
+
+/* Digital Clock Styles */
+.digital-clock {
+    width: 100%;
+    text-align: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Sans font */
+    font-size: 120px;
+    font-weight: bold;
+    color: #ffffff;
+    background-color: transparent; /* Use existing background */
+    padding: 0;
+    margin-bottom: 20px;
+    line-height: 0.85; /* デフォルトの行間を詰めて文字サイズぴったりにする */
+    letter-spacing: 2px;
+    
+    /* アニメーション用の設定 */
+    overflow: hidden;
+    max-height: 150px;
+    opacity: 1;
+    transition: opacity 0.3s ease, max-height 0.3s ease, margin 0.3s ease;
+}
+
+.digital-clock.hidden {
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+}
