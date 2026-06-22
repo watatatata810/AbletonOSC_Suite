@@ -822,6 +822,8 @@ const setupFabricEvents = (canvas, pageNum) => {
 
 let isPinching = false;
 let isPanning = false;
+let isThreeFingerPan = false;
+let hasExceededZoomThreshold = false;
 let initialDistance = 0;
 let initialZoom = 1.0;
 let lastCenter = { x: 0, y: 0 };
@@ -848,10 +850,13 @@ const getDistance = (touches) => {
 };
 
 const getCenter = (touches) => {
-    return {
-        x: (touches[0].clientX + touches[1].clientX) / 2,
-        y: (touches[0].clientY + touches[1].clientY) / 2
-    };
+    let x = 0, y = 0;
+    const len = Math.min(touches.length, 3);
+    for (let i = 0; i < len; i++) {
+        x += touches[i].clientX;
+        y += touches[i].clientY;
+    }
+    return { x: x / len, y: y / len };
 };
 
 
@@ -863,10 +868,32 @@ container.addEventListener('touchstart', (e) => {
         momentumId = null;
     }
 
-    if (e.touches.length >= 2) {
+    if (e.touches.length >= 3) {
+        pasteTouchCanceled = true;
+        isPinching = false;
+        isPanning = false;
+        isThreeFingerPan = true;
+        zoomWrapper.classList.remove('fast-zoom');
+        lastCenter = getCenter(e.touches);
+        lastTouchTime = Date.now();
+        velocityX = 0;
+        velocityY = 0;
+        
+        Object.values(fabricCanvases).forEach(c => {
+            if (c.isDrawingMode) {
+                c.isDrawingMode = false;
+                c.__wasDrawingMode = true;
+                if (c.contextTop) {
+                    c.clearContext(c.contextTop);
+                }
+            }
+        });
+    } else if (e.touches.length === 2) {
         pasteTouchCanceled = true; // 2本目の指が触れたらペーストをキャンセル
         isPinching = true;
         isPanning = false;
+        isThreeFingerPan = false;
+        hasExceededZoomThreshold = false;
         zoomWrapper.classList.add('fast-zoom'); // ズーム中はGPUキャッシュを使用して軽くする
         initialDistance = getDistance(e.touches);
         initialZoom = currentZoom;
@@ -887,6 +914,7 @@ container.addEventListener('touchstart', (e) => {
     } else if (e.touches.length === 1 && (currentMode === MODES.VIEW || currentMode === MODES.SELECT || currentMode === MODES.TRIGGER)) {
         // 1本指パンの準備 (SELECT/TRIGGERモードではtouchmove時にオブジェクトを触っていないか確認してパン開始)
         isPanning = (currentMode === MODES.VIEW); // VIEWモードは無条件でパン開始
+        isThreeFingerPan = false;
         container._potentialPan = true;
         lastCenter = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         lastTouchTime = Date.now();
@@ -896,18 +924,45 @@ container.addEventListener('touchstart', (e) => {
 }, { passive: false });
 
 container.addEventListener('touchmove', (e) => {
-    if (e.touches.length >= 2 && isPinching) {
+    if (e.touches.length >= 3 && isThreeFingerPan) {
+        e.preventDefault();
+        const currentCenter = getCenter(e.touches);
+        const dx = currentCenter.x - lastCenter.x;
+        const dy = currentCenter.y - lastCenter.y;
+        
+        const now = Date.now();
+        const dt = now - lastTouchTime;
+        if (dt > 0) {
+            velocityX = (dx / dt) * 0.8 + velocityX * 0.2;
+            velocityY = (dy / dt) * 0.8 + velocityY * 0.2;
+        }
+        lastTouchTime = now;
+        
+        container.scrollLeft -= dx;
+        container.scrollTop -= dy;
+        
+        lastCenter = currentCenter;
+    } else if (e.touches.length === 2 && isPinching) {
         e.preventDefault(); // ブラウザ標準のピンチズームを防ぐ
         
         const currentCenter = getCenter(e.touches);
         const dist = getDistance(e.touches);
         
-        const oldZoom = currentZoom;
-        const newZoom = initialZoom * (dist / initialDistance);
-        const clampedZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
+        if (!hasExceededZoomThreshold) {
+            if (Math.abs(dist - initialDistance) > 150) {
+                hasExceededZoomThreshold = true;
+                initialDistance = dist;
+                initialZoom = currentZoom;
+            }
+        }
         
-        // スケールが変わった場合、ズームの中心点（指の真ん中）がズレないようにスクロール位置を補正
-        if (oldZoom !== clampedZoom) {
+        if (hasExceededZoomThreshold) {
+            const oldZoom = currentZoom;
+            const newZoom = initialZoom * (dist / initialDistance);
+            const clampedZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
+            
+            // スケールが変わった場合、ズームの中心点（指の真ん中）がズレないようにスクロール位置を補正
+            if (oldZoom !== clampedZoom) {
             const rect = container.getBoundingClientRect();
             const relX = currentCenter.x - rect.left;
             const relY = currentCenter.y - rect.top;
@@ -941,6 +996,7 @@ container.addEventListener('touchmove', (e) => {
                 });
                 isZoomTicking = true;
             }
+        }
         }
         
         // パン（平行移動）処理
@@ -984,6 +1040,21 @@ container.addEventListener('touchmove', (e) => {
 }, { passive: false });
 
 container.addEventListener('touchend', (e) => {
+    if (e.touches.length < 3) {
+        if (isThreeFingerPan) {
+            isThreeFingerPan = false;
+            if (e.touches.length === 2) {
+                // 3本から2本になったらズームを再開
+                isPinching = true;
+                hasExceededZoomThreshold = false;
+                zoomWrapper.classList.add('fast-zoom');
+                initialDistance = getDistance(e.touches);
+                initialZoom = currentZoom;
+                lastCenter = getCenter(e.touches);
+            }
+        }
+    }
+
     if (e.touches.length < 2) {
         if (isPinching) {
             isPinching = false;
@@ -998,8 +1069,9 @@ container.addEventListener('touchend', (e) => {
             }
         });
     }
+    
     if (e.touches.length === 0) {
-        if (isPanning) {
+        if (isPanning || Math.abs(velocityX) > 0 || Math.abs(velocityY) > 0) {
             // 指を離した瞬間に慣性スクロール（物理演算）を開始
             const applyMomentum = () => {
                 // 十分に速度が落ちたら停止
@@ -1017,6 +1089,7 @@ container.addEventListener('touchend', (e) => {
             momentumId = requestAnimationFrame(applyMomentum);
         }
         isPanning = false;
+        isThreeFingerPan = false;
     }
 });
 
@@ -1311,6 +1384,35 @@ if (btnUpload && inputUpload) {
 // 他の端末（または自身）でPDFがアップロード・更新された場合、自動で画面をリロードする
 socket.on('pdf_updated', () => {
     window.location.reload();
+});
+
+// 他のクライアントで手書きや配置が行われたときのリアルタイム同期
+socket.on('page_data_updated', (data) => {
+    if (data.pdfName !== currentPdfName) return;
+    const pageNum = data.pageNum;
+    pagesData[pageNum] = data.fabricData;
+    const canvas = fabricCanvases[pageNum];
+    if (canvas && !canvas.isRestoring) {
+        canvas.isRestoring = true;
+        canvas.loadFromJSON(data.fabricData, () => {
+            // 既存のトリガーボタンも高画質化するためキャッシュを無効化
+            canvas.getObjects().forEach(obj => {
+                if (obj.isTrigger) {
+                    obj.set('objectCaching', false);
+                    if (obj.getObjects) {
+                        obj.getObjects().forEach(child => child.set('objectCaching', false));
+                    }
+                } else if (!obj.isTrigger && obj.type === 'path') {
+                    // ペンで描いた線の設定
+                    obj.perPixelTargetFind = false;
+                    obj.padding = 10;
+                }
+            });
+            setMode(currentMode); // 選択状態などの更新
+            canvas.renderAll();
+            canvas.isRestoring = false;
+        });
+    }
 });
 
 // --- PDF書き出し機能 ---

@@ -279,6 +279,13 @@ io.on('connection', (socket) => {
         fs.writeFile(DATA_FILE, JSON.stringify(currentData), (err) => {
             if (err) console.error('[File Error] データ保存エラー:', err);
         });
+        
+        // 他のクライアントに変更をブロードキャスト
+        socket.broadcast.emit('page_data_updated', {
+            pdfName: pdfKey,
+            pageNum: payload.pageNum,
+            fabricData: payload.fabricData
+        });
     });
 
     socket.on('disconnect', () => {
