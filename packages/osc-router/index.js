@@ -1,10 +1,38 @@
 const dgram = require('dgram');
+const fs = require('fs');
+const path = require('path');
 
-const LISTEN_PORT = 11001; // AbletonOSCからの受信ポート
-const HOST = '127.0.0.1';
+// デフォルト設定値
+const DEFAULT_CONFIG = {
+  host: '127.0.0.1',
+  listenPort: 11001,
+  targetPorts: [11002, 11003]
+};
 
-// 転送先（波形ビューアーアプリ: 11002, 台本トリガーアプリ: 11003）
-const TARGET_PORTS = [11002, 11003];
+let config = { ...DEFAULT_CONFIG };
+
+const configPath = path.join(__dirname, 'config.json');
+try {
+  if (fs.existsSync(configPath)) {
+    const rawData = fs.readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(rawData);
+    config = {
+      host: parsed.host || DEFAULT_CONFIG.host,
+      listenPort: parsed.listenPort !== undefined ? Number(parsed.listenPort) : DEFAULT_CONFIG.listenPort,
+      targetPorts: Array.isArray(parsed.targetPorts) ? parsed.targetPorts.map(Number) : DEFAULT_CONFIG.targetPorts
+    };
+  } else {
+    console.log(`[OSC Router] 設定ファイル (config.json) が見つかりません。デフォルト値を使用します。`);
+  }
+} catch (err) {
+  console.warn(`[OSC Router Warning] 設定ファイルの読み込みまたはパースに失敗しました。デフォルト値を使用します。:`, err.message);
+}
+
+const LISTEN_PORT = config.listenPort;
+const HOST = config.host;
+
+// 転送先（デフォルト: 波形ビューアーアプリ: 11002, 台本トリガーアプリ: 11003）
+const TARGET_PORTS = config.targetPorts;
 
 const server = dgram.createSocket('udp4');
 const client = dgram.createSocket('udp4');
