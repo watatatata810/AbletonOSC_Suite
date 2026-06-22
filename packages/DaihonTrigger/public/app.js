@@ -898,6 +898,9 @@ container.addEventListener('touchstart', (e) => {
         initialDistance = getDistance(e.touches);
         initialZoom = currentZoom;
         lastCenter = getCenter(e.touches);
+        lastTouchTime = Date.now();
+        velocityX = 0;
+        velocityY = 0;
         
         // 2本指以上なら手書きモードを一時解除し、スクロール等を許可
         Object.values(fabricCanvases).forEach(c => {
@@ -949,7 +952,7 @@ container.addEventListener('touchmove', (e) => {
         const dist = getDistance(e.touches);
         
         if (!hasExceededZoomThreshold) {
-            if (Math.abs(dist - initialDistance) > 150) {
+            if (Math.abs(dist - initialDistance) > 100) {
                 hasExceededZoomThreshold = true;
                 initialDistance = dist;
                 initialZoom = currentZoom;
@@ -1002,6 +1005,14 @@ container.addEventListener('touchmove', (e) => {
         // パン（平行移動）処理
         const dx = currentCenter.x - lastCenter.x;
         const dy = currentCenter.y - lastCenter.y;
+        
+        const now = Date.now();
+        const dt = now - lastTouchTime;
+        if (dt > 0) {
+            velocityX = (dx / dt) * 0.8 + velocityX * 0.2;
+            velocityY = (dy / dt) * 0.8 + velocityY * 0.2;
+        }
+        lastTouchTime = now;
         
         container.scrollLeft -= dx;
         container.scrollTop -= dy;
