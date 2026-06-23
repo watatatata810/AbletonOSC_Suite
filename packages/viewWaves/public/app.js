@@ -281,9 +281,23 @@ socket.on('song_playing', () => {
 });
 
 socket.on('clip_position', (data) => {
-    const { trackId, slotIndex, progress } = data;
+    let { trackId, slotIndex, progress, position } = data;
     const t = tracks[trackId];
     if (t) {
+        // サーバーから送られた生のpositionを使って、マーカー表示時と完全に同じ分母でprogressを再計算する
+        // これにより、プレイヘッドの位置とグレーアウトの位置がピクセルレベルで完全に一致する
+        if (position !== undefined && t.markerData && t.ws && t.ws.getDuration() > 0) {
+            const durationSec = t.ws.getDuration();
+            if (t.markerData.isWarped) {
+                const totalBeats = durationSec * (t.markerData.tempo / 60);
+                if (totalBeats > 0) {
+                    progress = position / totalBeats;
+                }
+            } else {
+                progress = position / durationSec;
+            }
+        }
+
         // サーバーが古いバージョン（slotIndex未定義）の場合はスキップしない
         if (slotIndex !== undefined && t.currentSceneIndex !== slotIndex) {
             // console.log(`[IGNORE] 遅延パケット無視: Track ${trackId + 1}, 現在のScene ${t.currentSceneIndex + 1} !== パケットのScene ${slotIndex + 1}`);
@@ -331,12 +345,10 @@ function animateCursor(trackId) {
         return;
     }
     
-    // Abletonからのprogress(0〜1)は、「Start〜End」の再生区間に対して進むため、
-    // playableMs（再生区間の物理時間）を使ってvelocityを算出する
-    const startPct = t.startPct || 0;
-    const endPct = t.endPct || 1;
-    const playableMs = durationMs * (endPct - startPct);
-    t.velocity = 1 / Math.max(playableMs, 1);
+    // プレイヘッドは波形全体の幅（0〜1）に対する絶対的な割合として描画されるため、
+    // velocity（1ミリ秒あたりの進行度）は常に「1 / 波形全体の実時間」とする必要があります。
+    // （※スタートポイントをずらした際にプレイヘッドが加速してしまうバグを修正）
+    t.velocity = 1 / Math.max(durationMs, 1);
     
     // ラグ補正（先読み）による目標オフセット値
     const targetOffsetProgress = t.velocity * latencyOffsetMs;
@@ -367,9 +379,9 @@ function animateCursor(trackId) {
     
     // 時間表示の更新
     if (t.timeEl && durationMs > 0) {
-        // playableMs はミリ秒
-        const elapsedSec = (extrapolatedProgress * playableMs) / 1000;
-        const remainingSec = ((1 - extrapolatedProgress) * playableMs) / 1000;
+        // 進行度（0〜1）× 波形全体の実時間 で現在位置（秒）を算出
+        const elapsedSec = (extrapolatedProgress * durationMs) / 1000;
+        const remainingSec = ((1 - extrapolatedProgress) * durationMs) / 1000;
         
         // 経過時間（切り捨て）
         const elMin = Math.floor(elapsedSec / 60);
@@ -389,11 +401,8 @@ function animateCursor(trackId) {
     }
     
     // WaveSurferのカーソルを進める
-    // extrapolatedProgress は Ableton上の進行度（0.0〜1.0）
-    // 実際の波形上の位置（パーセンテージ）にマッピングする
-    const actualProgress = startPct + (extrapolatedProgress * (endPct - startPct));
-    
-    t.ws.seekTo(Math.min(Math.max(actualProgress, 0), 1));
+    // extrapolatedProgress は波形全体に対する絶対的な進行度（0.0〜1.0）として計算済みのため、そのまま適用する
+    t.ws.seekTo(extrapolatedProgress);
     
     // 次のフレームも実行
     t.animationFrameId = requestAnimationFrame(() => animateCursor(trackId));

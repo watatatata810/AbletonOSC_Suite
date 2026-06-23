@@ -252,7 +252,8 @@ oscServer.on('message', (msg) => {
             io.emit('clip_position', {
                 trackId: trackId,
                 slotIndex: slotIndex,
-                progress: Math.min(Math.max(position / length, 0), 1)
+                progress: Math.min(Math.max(position / length, 0), 1),
+                position: position
             });
         }
     }
