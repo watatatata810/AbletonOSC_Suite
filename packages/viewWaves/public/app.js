@@ -201,6 +201,24 @@ function updatePlayheadUI(trackId, progress) {
         t.ws.seekTo(progress);
     }
 }
+
+/**
+ * 表示中のトラックを曲時間（短い順）でソートして再配置する
+ */
+function sortVisibleTracks() {
+    const visibleTracks = Object.values(tracks).filter(t => t.boxEl.classList.contains('visible'));
+    
+    visibleTracks.sort((a, b) => {
+        const durA = (a.ws && a.ws.getDuration() > 0) ? a.ws.getDuration() : Infinity;
+        const durB = (b.ws && b.ws.getDuration() > 0) ? b.ws.getDuration() : Infinity;
+        return durA - durB;
+    });
+    
+    // flexコンテナやDOMツリーに再度appendChildすることで順序が反映される
+    visibleTracks.forEach(t => {
+        waveformsContainer.appendChild(t.boxEl);
+    });
+}
 socket.on('connect', () => {
     document.body.className = 'status-waiting';
 });
@@ -317,6 +335,7 @@ function getOrCreateTrackUI(trackId) {
 
     const onReady = () => {
         updateTrackMarkers(tracks[trackId]);
+        sortVisibleTracks();
     };
     wsA.on('ready', onReady);
     wsB.on('ready', onReady);
@@ -368,6 +387,7 @@ socket.on('clip_playing', (data) => {
     // アニメーションを確実に発火させるため、少しだけ遅延させる
     setTimeout(() => {
         t.boxEl.classList.add('visible');
+        sortVisibleTracks();
         updateEmptyState();
     }, 10);
     
