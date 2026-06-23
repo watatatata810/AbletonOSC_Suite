@@ -237,6 +237,49 @@ function sortVisibleTracks() {
         t.boxEl.style.order = index;
     });
 }
+
+// ----------------------------------------------------
+// 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
+// ----------------------------------------------------
+let currentZoom = 0; // 0 = 画面幅にフィット
+const MIN_ZOOM = 10; // 最小のズーム倍率 (px/sec)
+const MAX_ZOOM = 500; // 最大のズーム倍率 (px/sec)
+const DEFAULT_ZOOM = 50; // 最初にズームインしたときの基準倍率
+
+waveformsContainer.addEventListener('wheel', (e) => {
+    // Ctrlキーが押されている場合（ピンチ操作もこれに該当するブラウザが多い）
+    if (e.ctrlKey) {
+        e.preventDefault(); // 画面全体の拡大縮小を防ぐ
+
+        // e.deltaY: 正の値はズームアウト（ピンチイン）、負の値はズームイン（ピンチアウト）
+        const zoomDelta = e.deltaY * -0.5; // 感度調整
+
+        // 初回ズームイン時（現在フィット表示で、拡大方向に操作された場合）
+        if (currentZoom === 0 && zoomDelta > 0) {
+            currentZoom = DEFAULT_ZOOM;
+        }
+
+        // ズーム中、またはフィット状態からのズームインの場合のみ処理
+        if (currentZoom !== 0 || zoomDelta > 0) {
+            currentZoom += zoomDelta;
+
+            // 制限
+            if (currentZoom < MIN_ZOOM) {
+                currentZoom = 0; // 一定以下になったらフィットに戻す
+            } else if (currentZoom > MAX_ZOOM) {
+                currentZoom = MAX_ZOOM;
+            }
+
+            // 全トラックのA面・B面にズーム設定を適用
+            // zoom(0) の場合は WaveSurfer はデフォルトのフィット表示に戻る
+            Object.values(tracks).forEach(t => {
+                if (t.layers.A.ws) t.layers.A.ws.zoom(currentZoom === 0 ? false : currentZoom);
+                if (t.layers.B.ws) t.layers.B.ws.zoom(currentZoom === 0 ? false : currentZoom);
+            });
+        }
+    }
+}, { passive: false }); // preventDefault() を機能させるために passive: false を指定
+
 socket.on('connect', () => {
     document.body.className = 'status-waiting';
 });
