@@ -314,8 +314,6 @@ function applyPendingZoom() {
         currentZoom *= zoomFactor;
 
         // fitZoom以下に下がった場合のみフィット表示(0)にスナップする
-        // （以前は fitZoom * 1.2 の閾値だったが、タッチパッドの微小deltaYでは
-        //   ズーム直後にスナップバックしてしまい、実質ズームが効かなかった）
         if (currentZoom <= fitZoom) {
             currentZoom = 0;
         } else if (currentZoom > MAX_ZOOM) {
@@ -324,35 +322,32 @@ function applyPendingZoom() {
 
         const newEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
 
-        Object.values(tracks).forEach(t => {
+        Object.values(tracks).forEach((t, trackIndex) => {
             const wsA = t.layers.A.ws;
             const wsB = t.layers.B.ws;
             const activeWs = t.ws;
 
             if (activeWs && activeWs.getDuration() > 0) {
                 const duration = activeWs.getDuration();
-                const wrapper = activeWs.getWrapper();
-                const wrapperRect = wrapper.getBoundingClientRect();
-                const mouseXInWrapper = Math.max(0, mouseClientX - wrapperRect.left);
+                const scrollContainer = activeWs.renderer.scrollContainer;
+                const containerRect = scrollContainer.getBoundingClientRect();
+                const mouseXInContainer = Math.max(0, mouseClientX - containerRect.left);
 
                 const oldFullWidth = duration * oldEffectiveZoom;
-                const oldScrollLeft = wrapper.scrollLeft;
-                const contentPosUnderMouse = oldScrollLeft + mouseXInWrapper;
+                const oldScrollLeft = scrollContainer.scrollLeft;
+                const contentPosUnderMouse = oldScrollLeft + mouseXInContainer;
 
-                if (wsA) wsA.renderer._skipScrollCorrection = true;
-                if (wsB) wsB.renderer._skipScrollCorrection = true;
-
-                if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
-                if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
-
-                if (wsA) wsA.renderer._skipScrollCorrection = false;
-                if (wsB) wsB.renderer._skipScrollCorrection = false;
+                if (activeWs) {
+                    activeWs.renderer._skipScrollCorrection = true;
+                    activeWs.zoom(currentZoom === 0 ? false : currentZoom);
+                    activeWs.renderer._skipScrollCorrection = false;
+                }
 
                 const newFullWidth = duration * newEffectiveZoom;
                 const scaledPos = contentPosUnderMouse * (newFullWidth / oldFullWidth);
-                const newScrollLeft = Math.max(0, scaledPos - mouseXInWrapper);
+                const newScrollLeft = Math.max(0, scaledPos - mouseXInContainer);
 
-                wrapper.scrollLeft = newScrollLeft;
+                scrollContainer.scrollLeft = newScrollLeft;
             }
         });
     }
@@ -511,12 +506,18 @@ function getOrCreateTrackUI(trackId) {
 
     const onReadyA = () => {
         tracks[trackId].layers.A.isReady = true;
+        if (currentZoom !== 0) {
+            tracks[trackId].layers.A.ws.zoom(currentZoom);
+        }
         updateTrackMarkers(tracks[trackId]);
         updateNextReadyUI(trackId);
         sortVisibleTracks();
     };
     const onReadyB = () => {
         tracks[trackId].layers.B.isReady = true;
+        if (currentZoom !== 0) {
+            tracks[trackId].layers.B.ws.zoom(currentZoom);
+        }
         updateTrackMarkers(tracks[trackId]);
         updateNextReadyUI(trackId);
         sortVisibleTracks();
@@ -598,6 +599,11 @@ socket.on('clip_playing', (data) => {
         inactiveLayer.el.classList.add('active');
         
         t.activeLayerKey = inactiveKey;
+        
+        // 新しくアクティブになった WaveSurfer に現在のズーム倍率を適用
+        if (t.ws && t.ws.decodedData) {
+            t.ws.zoom(currentZoom === 0 ? false : currentZoom);
+        }
         
         // スワップされた（元アクティブだった）レイヤーをリセットする
         activeLayer.url = null;
