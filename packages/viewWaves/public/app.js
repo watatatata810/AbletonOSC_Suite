@@ -231,9 +231,10 @@ function sortVisibleTracks() {
         return durA - durB;
     });
     
-    // flexコンテナやDOMツリーに再度appendChildすることで順序が反映される
-    visibleTracks.forEach(t => {
-        waveformsContainer.appendChild(t.boxEl);
+    // appendChildでDOMを移動するとCSSアニメーションがキャンセルされてしまうため、
+    // Flexboxの order プロパティを使用して見た目の順序だけを変更する
+    visibleTracks.forEach((t, index) => {
+        t.boxEl.style.order = index;
     });
 }
 socket.on('connect', () => {
