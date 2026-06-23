@@ -120,10 +120,10 @@ function calculateMarkerPercentages(markerData, durationSec) {
  * @param {number} durationMs 音声ファイルの実時間 (ms)
  * @param {number} startPct マーカーの開始割合 (0.0〜1.0)
  * @param {number} endPct マーカーの終了割合 (0.0〜1.0)
- * @returns {string} フォーマットされた時間文字列
+ * @returns {{text: string, isCountdown: boolean}} フォーマットされた時間文字列と状態
  */
 function calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct) {
-    if (durationMs <= 0) return "00:00 / -00:00";
+    if (durationMs <= 0) return { text: "00:00 / -00:00", isCountdown: false };
 
     // 再生区間（スタート〜エンド）に対する相対的な進行度
     const elapsedProgress = Math.max(0, extrapolatedProgress - startPct);
@@ -136,12 +136,27 @@ function calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct
     const elSec = Math.floor(elapsedSec % 60);
     const elStr = `${elMin.toString().padStart(2, '0')}:${elSec.toString().padStart(2, '0')}`;
 
-    const remTotalSec = Math.ceil(remainingSec);
-    const remMin = Math.floor(remTotalSec / 60);
-    const remSec = remTotalSec % 60;
-    const remStr = `-${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
+    const isCountdown = remainingSec > 0 && remainingSec <= 15;
+    let remStr = '';
 
-    return `${elStr} / ${remStr}`;
+    if (isCountdown) {
+        const remMin = Math.floor(remainingSec / 60);
+        const remSecOnly = remainingSec % 60;
+        // 小数点第2位まで（e.g. 14.30）
+        const remSecFixed = remSecOnly.toFixed(2).padStart(5, '0');
+        
+        // 整数カウントダウン（0で終了）
+        const countdownInt = Math.ceil(remainingSec).toString().padStart(2, '0');
+        
+        remStr = `-${remMin.toString().padStart(2, '0')}:${remSecFixed} (${countdownInt})`;
+    } else {
+        const remTotalSec = Math.floor(remainingSec);
+        const remMin = Math.floor(remTotalSec / 60);
+        const remSec = remTotalSec % 60;
+        remStr = `-${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
+    }
+
+    return { text: `${elStr} / ${remStr}`, isCountdown };
 }
 
 // ==========================================
@@ -157,10 +172,23 @@ function updateOverlayUI(trackId, startPct, endPct) {
     }
 }
 
-function updateTimerUI(trackId, timeText) {
+function updateTimerUI(trackId, timeData) {
     const t = tracks[trackId];
-    if (t && t.timeEl && t.timeEl.textContent !== timeText) {
-        t.timeEl.textContent = timeText;
+    if (t && t.timeEl) {
+        if (t.timeEl.textContent !== timeData.text) {
+            t.timeEl.textContent = timeData.text;
+        }
+        
+        // カウントダウン状態のクラス切り替え（フェードアニメーション用）
+        if (timeData.isCountdown) {
+            if (!t.timeEl.classList.contains('countdown-active')) {
+                t.timeEl.classList.add('countdown-active');
+            }
+        } else {
+            if (t.timeEl.classList.contains('countdown-active')) {
+                t.timeEl.classList.remove('countdown-active');
+            }
+        }
     }
 }
 
@@ -489,8 +517,8 @@ function animateCursor(trackId) {
     // 時間表示の更新
     const startPct = t.startPct || 0;
     const endPct = t.endPct || 1;
-    const timeText = calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct);
-    updateTimerUI(trackId, timeText);
+    const timeData = calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct);
+    updateTimerUI(trackId, timeData);
     
     // WaveSurferのカーソルを進める
     updatePlayheadUI(trackId, extrapolatedProgress);
