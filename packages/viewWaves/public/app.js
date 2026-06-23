@@ -285,11 +285,37 @@ waveformsContainer.addEventListener('wheel', (e) => {
                 currentZoom = MAX_ZOOM;
             }
 
-            // 全トラックのA面・B面にズーム設定を適用
-            // zoom(0) または false の場合は WaveSurfer はデフォルトのフィット表示に戻る
+            // マウスカーソルの位置を中心としたズームを計算
+            const containerRect = waveformsContainer.getBoundingClientRect();
+            // コンテナ内でのマウスX座標 (0 ～ containerWidth)
+            const mouseX = Math.max(0, Math.min(e.clientX - containerRect.left, containerRect.width));
+
+            // 全トラックのA面・B面にズーム設定と、再計算したスクロール位置を適用
             Object.values(tracks).forEach(t => {
-                if (t.layers.A.ws) t.layers.A.ws.zoom(currentZoom === 0 ? false : currentZoom);
-                if (t.layers.B.ws) t.layers.B.ws.zoom(currentZoom === 0 ? false : currentZoom);
+                const wsA = t.layers.A.ws;
+                const wsB = t.layers.B.ws;
+                const activeWs = t.ws;
+
+                if (activeWs && activeWs.getDuration() > 0) {
+                    const duration = activeWs.getDuration();
+                    const containerWidth = activeWs.getWrapper().clientWidth;
+                    
+                    // ズーム前の全体幅とスクロール位置から、マウスが指している波形の「割合(0.0~1.0)」を計算
+                    const oldFullWidth = oldZoom === 0 ? containerWidth : (duration * oldZoom);
+                    const oldScrollLeft = activeWs.getScroll();
+                    const ratio = (oldScrollLeft + mouseX) / oldFullWidth;
+
+                    // ズーム倍率を適用 (0またはfalseの場合はフィット表示)
+                    if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
+                    if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
+
+                    // ズーム後の全体幅を用いて、同じ「割合」の箇所がマウス位置にくるような新しいスクロール位置を計算
+                    const newFullWidth = currentZoom === 0 ? containerWidth : (duration * currentZoom);
+                    const newScrollLeft = (ratio * newFullWidth) - mouseX;
+
+                    if (wsA) wsA.setScroll(newScrollLeft);
+                    if (wsB) wsB.setScroll(newScrollLeft);
+                }
             });
         }
     } else {
