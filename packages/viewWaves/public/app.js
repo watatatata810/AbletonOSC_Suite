@@ -399,8 +399,8 @@ function getOrCreateTrackUI(trackId) {
         cursorWidth: 2,
         height: 128,
         interact: false, // Prevent user clicking to seek
-        autoScroll: autoScrollMode === 'center' || autoScrollMode === 'page',
-        autoCenter: autoScrollMode === 'center'
+        autoScroll: false, // 自前で制御するため標準機能はオフ
+        autoCenter: false  // 自前で制御するため標準機能はオフ
     };
 
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
@@ -807,12 +807,10 @@ if (clockToggle && digitalClock) {
 const autoScrollModeSelect = document.getElementById('autoscroll-mode');
 
 function applyScrollModeToTracks() {
-    const autoScroll = autoScrollMode === 'center' || autoScrollMode === 'page';
-    const autoCenter = autoScrollMode === 'center';
-    
+    // 追従制御は手動（updatePlayheadUI）で行うため、WaveSurfer標準機能は常にオフにする
     Object.values(tracks).forEach(t => {
-        if (t.layers.A.ws) t.layers.A.ws.setOptions({ autoScroll, autoCenter });
-        if (t.layers.B.ws) t.layers.B.ws.setOptions({ autoScroll, autoCenter });
+        if (t.layers.A.ws) t.layers.A.ws.setOptions({ autoScroll: false, autoCenter: false });
+        if (t.layers.B.ws) t.layers.B.ws.setOptions({ autoScroll: false, autoCenter: false });
     });
 }
 
@@ -824,7 +822,7 @@ if (autoScrollModeSelect) {
 }
 
 function updateClock() {
-    if (!clockEl) return;
+    if (!digitalClock) return;
     const now = new Date();
     const h = String(now.getHours()).padStart(2, '0');
     const m = String(now.getMinutes()).padStart(2, '0');
@@ -832,8 +830,8 @@ function updateClock() {
     const timeString = `${h}:${m}:${s}`;
     
     // パフォーマンスのため、時刻文字列が変化したときだけDOMを更新する
-    if (clockEl.textContent !== timeString) {
-        clockEl.textContent = timeString;
+    if (digitalClock.textContent !== timeString) {
+        digitalClock.textContent = timeString;
     }
 }
 
