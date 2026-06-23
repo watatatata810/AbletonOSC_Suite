@@ -319,7 +319,7 @@ function getOrCreateTrackUI(trackId) {
         waveColor: '#ff9800',
         progressColor: '#e68900',
         cursorColor: '#fff',
-        cursorWidth: 1,
+        cursorWidth: 2,
         height: 128,
         interact: false // Prevent user clicking to seek
     };
