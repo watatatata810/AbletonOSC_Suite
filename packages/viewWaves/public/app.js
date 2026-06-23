@@ -262,6 +262,9 @@ waveformsContainer.addEventListener('wheel', (e) => {
 
         // e.deltaY: 正の値はズームアウト（ピンチイン）、負の値はズームイン（ピンチアウト）
         const isZoomingIn = e.deltaY < 0;
+        
+        // ズーム前の倍率を保持
+        const oldZoom = currentZoom;
 
         // 初回ズームイン時（現在フィット表示で、拡大方向に操作された場合）
         // 50などの固定値ではなく、現在のフィット倍率を基準に開始することでガクつきをなくす
