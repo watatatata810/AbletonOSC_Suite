@@ -56,6 +56,117 @@ const tracks = {};
 
 let isSongPlaying = false;
 
+// ==========================================
+// 純粋関数群 (Pure Functions)
+// ==========================================
+
+/**
+ * 進行度（0.0〜1.0）を計算する
+ * @param {number} position 現在の拍数 (beats)
+ * @param {Object} markerData マーカー情報
+ * @param {number} durationSec 音声ファイルの実時間 (seconds)
+ * @returns {number} 波形全体に対する絶対的なパーセンテージ
+ */
+function calculateAbsoluteProgress(position, markerData, durationSec) {
+    if (position === undefined || !markerData || durationSec <= 0) return 0;
+    
+    if (markerData.isWarped) {
+        const totalBeats = durationSec * (markerData.tempo / 60);
+        return totalBeats > 0 ? position / totalBeats : 0;
+    } else {
+        return position / durationSec;
+    }
+}
+
+/**
+ * マーカーの表示用パーセンテージを計算する
+ * @param {Object} markerData マーカー情報
+ * @param {number} durationSec 音声ファイルの実時間 (seconds)
+ * @returns {{startPct: number, endPct: number}}
+ */
+function calculateMarkerPercentages(markerData, durationSec) {
+    if (!markerData || durationSec <= 0) return { startPct: 0, endPct: 1 };
+
+    let startPct = 0;
+    let endPct = 1;
+
+    // AbletonOSCの仕様対応：非ループ時でもエンドポイントを動かすとloop_endが変化するため、
+    // isLoopingのON/OFFに関わらず「より手前にあるマーカー」を常に実質的なエンドとする
+    const actualEnd = (markerData.loopEnd !== undefined && markerData.loopEnd < markerData.endMarker)
+        ? markerData.loopEnd
+        : markerData.endMarker;
+
+    if (markerData.isWarped) {
+        const totalBeats = durationSec * (markerData.tempo / 60);
+        if (totalBeats > 0) {
+            startPct = Math.max(0, markerData.startMarker / totalBeats);
+            endPct = Math.min(1, actualEnd / totalBeats);
+        }
+    } else {
+        startPct = Math.max(0, markerData.startMarker / durationSec);
+        endPct = Math.min(1, actualEnd / durationSec);
+    }
+
+    // 異常値の場合は補正
+    if (startPct >= 1) startPct = 0;
+    if (endPct <= startPct) endPct = 1;
+
+    return { startPct, endPct };
+}
+
+/**
+ * タイマー表示用の文字列を生成する
+ * @param {number} extrapolatedProgress 現在の進行割合 (0.0〜1.0)
+ * @param {number} durationMs 音声ファイルの実時間 (ms)
+ * @returns {string} フォーマットされた時間文字列
+ */
+function calculateTimeDisplay(extrapolatedProgress, durationMs) {
+    if (durationMs <= 0) return "00:00 / -00:00";
+
+    const elapsedSec = (extrapolatedProgress * durationMs) / 1000;
+    const remainingSec = ((1 - extrapolatedProgress) * durationMs) / 1000;
+
+    const elMin = Math.floor(elapsedSec / 60);
+    const elSec = Math.floor(elapsedSec % 60);
+    const elStr = `${elMin.toString().padStart(2, '0')}:${elSec.toString().padStart(2, '0')}`;
+
+    const remTotalSec = Math.ceil(remainingSec);
+    const remMin = Math.floor(remTotalSec / 60);
+    const remSec = remTotalSec % 60;
+    const remStr = `-${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
+
+    return `${elStr} / ${remStr}`;
+}
+
+// ==========================================
+// UI更新関数群 (UI Update Functions)
+// ==========================================
+
+function updateOverlayUI(trackId, startPct, endPct) {
+    const overlayLeft = document.getElementById(`overlay-left-${trackId}`);
+    const overlayRight = document.getElementById(`overlay-right-${trackId}`);
+    if (overlayLeft && overlayRight) {
+        overlayLeft.style.width = `${startPct * 100}%`;
+        overlayRight.style.width = `${(1 - endPct) * 100}%`;
+    }
+}
+
+function updateTimerUI(trackId, timeText) {
+    const t = tracks[trackId];
+    if (t && t.timeEl && t.timeEl.textContent !== timeText) {
+        t.timeEl.textContent = timeText;
+    }
+}
+
+function updatePlayheadUI(trackId, progress) {
+    const t = tracks[trackId];
+    if (!t) return;
+
+    // WaveSurferの内部カーソルを更新
+    if (t.ws) {
+        t.ws.seekTo(progress);
+    }
+}
 socket.on('connect', () => {
     document.body.className = 'status-waiting';
 });
@@ -285,17 +396,9 @@ socket.on('clip_position', (data) => {
     const t = tracks[trackId];
     if (t) {
         // サーバーから送られた生のpositionを使って、マーカー表示時と完全に同じ分母でprogressを再計算する
-        // これにより、プレイヘッドの位置とグレーアウトの位置がピクセルレベルで完全に一致する
-        if (position !== undefined && t.markerData && t.ws && t.ws.getDuration() > 0) {
-            const durationSec = t.ws.getDuration();
-            if (t.markerData.isWarped) {
-                const totalBeats = durationSec * (t.markerData.tempo / 60);
-                if (totalBeats > 0) {
-                    progress = position / totalBeats;
-                }
-            } else {
-                progress = position / durationSec;
-            }
+        // （純粋関数に委譲してロジックを分離）
+        if (t.ws && t.ws.getDuration() > 0) {
+            progress = calculateAbsoluteProgress(position, t.markerData, t.ws.getDuration());
         }
 
         // サーバーが古いバージョン（slotIndex未定義）の場合はスキップしない
@@ -378,31 +481,11 @@ function animateCursor(trackId) {
     t.currentProgress = extrapolatedProgress;
     
     // 時間表示の更新
-    if (t.timeEl && durationMs > 0) {
-        // 進行度（0〜1）× 波形全体の実時間 で現在位置（秒）を算出
-        const elapsedSec = (extrapolatedProgress * durationMs) / 1000;
-        const remainingSec = ((1 - extrapolatedProgress) * durationMs) / 1000;
-        
-        // 経過時間（切り捨て）
-        const elMin = Math.floor(elapsedSec / 60);
-        const elSec = Math.floor(elapsedSec % 60);
-        const elStr = `${elMin.toString().padStart(2, '0')}:${elSec.toString().padStart(2, '0')}`;
-        
-        // 残り時間（切り上げ）
-        const remTotalSec = Math.ceil(remainingSec);
-        const remMin = Math.floor(remTotalSec / 60);
-        const remSec = remTotalSec % 60;
-        const remStr = `-${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
-        
-        const newTimeText = `${elStr} / ${remStr}`;
-        if (t.timeEl.textContent !== newTimeText) {
-            t.timeEl.textContent = newTimeText;
-        }
-    }
+    const timeText = calculateTimeDisplay(extrapolatedProgress, durationMs);
+    updateTimerUI(trackId, timeText);
     
     // WaveSurferのカーソルを進める
-    // extrapolatedProgress は波形全体に対する絶対的な進行度（0.0〜1.0）として計算済みのため、そのまま適用する
-    t.ws.seekTo(extrapolatedProgress);
+    updatePlayheadUI(trackId, extrapolatedProgress);
     
     // 次のフレームも実行
     t.animationFrameId = requestAnimationFrame(() => animateCursor(trackId));
@@ -450,49 +533,17 @@ function updateTrackMarkers(t) {
     if (!t.markerData || !t.ws || t.ws.getDuration() === 0) return;
     
     const durationSec = t.ws.getDuration();
-    let startPct = 0;
-    let endPct = 1;
     
-    if (t.markerData.isWarped) {
-        // ワープされている場合：拍（Beats）ベースで計算
-        // totalBeatsはWaveSurferの実ファイル長×テンポで算出する
-        // ※clip.lengthはAbletonのループ長であり音声ファイル全体のビート長ではないため使用しない
-        const totalBeats = durationSec * (t.markerData.tempo / 60);
-        if (totalBeats > 0) {
-            // AbletonOSCの仕様対応：非ループ時でもエンドポイントを動かすとloop_endが変化するため、
-            // isLoopingのON/OFFに関わらず「より手前にあるマーカー」を常に実質的なエンドとする
-            const actualEnd = (t.markerData.loopEnd !== undefined && t.markerData.loopEnd < t.markerData.endMarker)
-                ? t.markerData.loopEnd
-                : t.markerData.endMarker;
-            startPct = Math.max(0, t.markerData.startMarker / totalBeats);
-            endPct = Math.min(1, actualEnd / totalBeats);
-        }
-    } else {
-        // ワープされていない場合：秒（Seconds）ベースで直接計算
-        if (durationSec > 0) {
-            const actualEnd = (t.markerData.loopEnd !== undefined && t.markerData.loopEnd < t.markerData.endMarker)
-                ? t.markerData.loopEnd
-                : t.markerData.endMarker;
-            startPct = Math.max(0, t.markerData.startMarker / durationSec);
-            endPct = Math.min(1, actualEnd / durationSec);
-        }
-    }
+    // 純粋関数を使ってパーセンテージを計算
+    const { startPct, endPct } = calculateMarkerPercentages(t.markerData, durationSec);
     
-    // 異常値の場合は補正
-    if (startPct >= 1) startPct = 0;
-    if (endPct <= startPct) endPct = 1;
-    
+    // 状態を保持
     t.startPct = startPct;
     t.endPct = endPct;
     
-    // UIのグレーアウト幅を更新
+    // UIを更新
     const trackId = Object.keys(tracks).find(key => tracks[key] === t);
-    const overlayLeft = document.getElementById(`overlay-left-${trackId}`);
-    const overlayRight = document.getElementById(`overlay-right-${trackId}`);
-    if (overlayLeft && overlayRight) {
-        overlayLeft.style.width = `${startPct * 100}%`;
-        overlayRight.style.width = `${(1 - endPct) * 100}%`;
-    }
+    updateOverlayUI(trackId, startPct, endPct);
 }
 
 // ==========================================
