@@ -238,6 +238,36 @@ function sortVisibleTracks() {
     });
 }
 
+/**
+ * WaveSurfer V7 の renderer.reRender() をモンキーパッチし、
+ * フラグが立っている間はズーム時のスクロール自動補正をスキップさせる。
+ *
+ * 原本の reRender() は以下を行う:
+ *   1. スクロールリスナーの解除
+ *   2. progressWrapper の画面位置を保存
+ *   3. render(audioData) で波形を再描画
+ *   4. scrollLeft を補正してプレイヘッドの画面位置を維持 ← これがマウスズームの邪魔
+ * パッチ版は手順4だけをスキップする。
+ */
+function patchReRenderForZoom(ws) {
+    const renderer = ws.renderer;
+    const origReRender = renderer.reRender.bind(renderer);
+
+    renderer._skipScrollCorrection = false;
+
+    renderer.reRender = function () {
+        if (this._skipScrollCorrection) {
+            // スクロール補正なしで再描画だけ行う
+            this.unsubscribeOnScroll.forEach(fn => fn());
+            this.unsubscribeOnScroll = [];
+            if (!this.audioData) return;
+            this.render(this.audioData);
+        } else {
+            origReRender();
+        }
+    };
+}
+
 // ----------------------------------------------------
 // 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
 // ----------------------------------------------------
@@ -305,28 +335,26 @@ waveformsContainer.addEventListener('wheel', (e) => {
                     const oldScrollLeft = activeWs.getScroll();
                     const ratio = (oldScrollLeft + mouseX) / oldFullWidth;
 
+                    // reRender のスクロール補正をスキップするフラグを立てる
+                    if (wsA) wsA.renderer._skipScrollCorrection = true;
+                    if (wsB) wsB.renderer._skipScrollCorrection = true;
+
                     // ズーム倍率を適用 (0またはfalseの場合はフィット表示)
-                    // ※ WaveSurfer V7 は内部の `reRender` 処理において、「プレイヘッド（progressWrapper）が画面上で動かないように」
-                    // 自動的に scrollLeft を補正するハードコーディングされたロジックを持っています。
+                    // zoom() → reRender() が呼ばれるが、フラグにより scrollLeft 補正はスキップされる
                     if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
                     if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
+
+                    // フラグを解除（通常の reRender に戻す）
+                    if (wsA) wsA.renderer._skipScrollCorrection = false;
+                    if (wsB) wsB.renderer._skipScrollCorrection = false;
 
                     // ズーム後の全体幅を用いて、同じ「割合」の箇所がマウス位置にくるような新しいスクロール位置を計算
                     const newFullWidth = currentZoom === 0 ? containerWidth : (duration * currentZoom);
                     const newScrollLeft = (ratio * newFullWidth) - mouseX;
 
-                    // WaveSurferによるプレイヘッド中心の強制スクロール補正を上書きするため、
-                    // DOMの更新が完了した直後に setScroll を適用する（念のため複数フレームにわたって適用）
-                    const applyScroll = () => {
-                        if (wsA) wsA.setScroll(newScrollLeft);
-                        if (wsB) wsB.setScroll(newScrollLeft);
-                    };
-
-                    requestAnimationFrame(() => {
-                        applyScroll();
-                        setTimeout(applyScroll, 0);
-                        setTimeout(applyScroll, 10);
-                    });
+                    // スクロール補正がスキップされたので、ここで同期的にマウス位置へスクロールを適用できる
+                    if (wsA) wsA.setScroll(newScrollLeft);
+                    if (wsB) wsB.setScroll(newScrollLeft);
                 }
             });
         }
@@ -436,6 +464,14 @@ function getOrCreateTrackUI(trackId) {
     // WaveSurfer標準のジャンプスクロールを無効化（自前で滑らかに制御するため）
     wsA.renderer.scrollIntoView = () => {};
     wsB.renderer.scrollIntoView = () => {};
+
+    // WaveSurfer V7の reRender() は内部で「プレイヘッドの画面上のピクセル位置が
+    // ズーム前後で動かないように scrollLeft を自動補正する」ハードコーディングされた処理を持つ。
+    // zoom() は内部で reRender() を呼ぶため、zoom()呼び出し後に setScroll() で
+    // マウス位置へスクロールしても、次の zoom() 呼び出しで再びプレイヘッドに戻されてしまう。
+    // この問題を解決するため、reRender のスクロール補正部分だけをスキップするフラグ付きパッチを当てる。
+    patchReRenderForZoom(wsA);
+    patchReRenderForZoom(wsB);
 
     tracks[trackId] = {
         layers: {
