@@ -364,7 +364,9 @@ function getOrCreateTrackUI(trackId) {
         cursorColor: '#fff',
         cursorWidth: 2,
         height: 128,
-        interact: false // Prevent user clicking to seek
+        interact: false, // Prevent user clicking to seek
+        autoScroll: isAutoScrollEnabled,
+        autoCenter: isAutoScrollEnabled
     };
 
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
@@ -752,16 +754,33 @@ function updateTrackMarkers(t) {
 // ==========================================
 // デジタル時計の更新処理
 // ==========================================
-const clockEl = document.getElementById('digital-clock');
+const digitalClock = document.getElementById('digital-clock');
 const clockToggle = document.getElementById('clock-toggle');
 
-if (clockToggle && clockEl) {
+// グローバル設定変数
+let isAutoScrollEnabled = true;
+
+// デジタル時計の表示・非表示切り替え
+if (clockToggle && digitalClock) {
     clockToggle.addEventListener('change', (e) => {
-        if (e.target.checked) {
-            clockEl.classList.remove('hidden');
-        } else {
-            clockEl.classList.add('hidden');
-        }
+        digitalClock.style.display = e.target.checked ? 'block' : 'none';
+    });
+}
+
+// ==========================================
+// 波形スクロール自動追従設定
+// ==========================================
+const autoScrollToggle = document.getElementById('autoscroll-toggle');
+
+if (autoScrollToggle) {
+    autoScrollToggle.addEventListener('change', (e) => {
+        isAutoScrollEnabled = e.target.checked;
+        
+        // 既存のすべての波形に追従設定を反映
+        Object.values(tracks).forEach(t => {
+            if (t.layers.A.ws) t.layers.A.ws.setOptions({ autoScroll: isAutoScrollEnabled, autoCenter: isAutoScrollEnabled });
+            if (t.layers.B.ws) t.layers.B.ws.setOptions({ autoScroll: isAutoScrollEnabled, autoCenter: isAutoScrollEnabled });
+        });
     });
 }
 
