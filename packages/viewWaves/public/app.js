@@ -202,7 +202,8 @@ function updatePlayheadUI(trackId, progress) {
         
         // OSC通信による手動でのseekTo実行時は、WaveSurfer標準のautoCenterが機能しないため
         // ここで自前で追従モードに応じたスクロール制御を行う
-        if (autoScrollMode !== 'off') {
+        // ユーザーが手動でスクロール中の場合は一時的に追従を停止する
+        if (autoScrollMode !== 'off' && !isUserScrolling) {
             const containerWidth = t.ws.getWrapper().clientWidth;
             const duration = t.ws.getDuration();
             
@@ -264,9 +265,12 @@ function sortVisibleTracks() {
 
 // ----------------------------------------------------
 // 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
+// および 手動スクロール時の自動追従一時停止
 // ----------------------------------------------------
 let currentZoom = 0; // 0 = 画面幅にフィット
 const MAX_ZOOM = 1000; // 最大のズーム倍率 (px/sec)
+let isUserScrolling = false;
+let scrollTimeout = null;
 
 waveformsContainer.addEventListener('wheel', (e) => {
     // Ctrlキーが押されている場合（ピンチ操作もこれに該当するブラウザが多い）
@@ -313,6 +317,14 @@ waveformsContainer.addEventListener('wheel', (e) => {
                 if (t.layers.B.ws) t.layers.B.ws.zoom(currentZoom === 0 ? false : currentZoom);
             });
         }
+    } else {
+        // Ctrlキーがない場合＝通常の横スクロール操作
+        // ユーザーが自発的に波形を見ようとしているため、一時的に自動追従を停止する
+        isUserScrolling = true;
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            isUserScrolling = false; // 3秒後に自動追従を再開
+        }, 3000);
     }
 }, { passive: false }); // preventDefault() を機能させるために passive: false を指定
 
@@ -401,12 +413,16 @@ function getOrCreateTrackUI(trackId) {
         cursorWidth: 2,
         height: 128,
         interact: false, // Prevent user clicking to seek
-        autoScroll: false, // 自前で制御するため標準機能はオフ
+        autoScroll: true,  // overflow-x: auto を維持するため true (手動スクロール可能にする)
         autoCenter: false  // 自前で制御するため標準機能はオフ
     };
 
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
     const wsB = WaveSurfer.create({ container: `#ws-layer-b-${trackId}`, ...wsOptions });
+
+    // WaveSurfer標準のジャンプスクロールを無効化（自前で滑らかに制御するため）
+    wsA.renderer.scrollIntoView = () => {};
+    wsB.renderer.scrollIntoView = () => {};
 
     tracks[trackId] = {
         layers: {
@@ -809,10 +825,17 @@ if (clockToggle && digitalClock) {
 const autoScrollModeSelect = document.getElementById('autoscroll-mode');
 
 function applyScrollModeToTracks() {
-    // 追従制御は手動（updatePlayheadUI）で行うため、WaveSurfer標準機能は常にオフにする
+    // 追従制御は手動（updatePlayheadUI）で行うが、
+    // 波形の手動横スクロール（overflow-x: auto）を維持するために autoScroll: true はセットする
     Object.values(tracks).forEach(t => {
-        if (t.layers.A.ws) t.layers.A.ws.setOptions({ autoScroll: false, autoCenter: false });
-        if (t.layers.B.ws) t.layers.B.ws.setOptions({ autoScroll: false, autoCenter: false });
+        if (t.layers.A.ws) {
+            t.layers.A.ws.setOptions({ autoScroll: true, autoCenter: false });
+            t.layers.A.ws.renderer.scrollIntoView = () => {}; // 標準のジャンプを無効化
+        }
+        if (t.layers.B.ws) {
+            t.layers.B.ws.setOptions({ autoScroll: true, autoCenter: false });
+            t.layers.B.ws.renderer.scrollIntoView = () => {};
+        }
     });
 }
 
