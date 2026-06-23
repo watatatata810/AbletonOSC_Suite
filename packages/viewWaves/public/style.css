@@ -183,6 +183,26 @@ button:active {
     overflow: hidden;
 }
 
+.ws-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.ws-layer.inactive {
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.ws-layer.active {
+    opacity: 1;
+    z-index: 2;
+}
+
 /* WaveSurfer内部のカーソルが滑らかに動くアニメーション（早送りに見える原因）を無効化 */
 .waveform ::part(cursor) {
     transition: none !important;

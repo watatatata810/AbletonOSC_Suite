@@ -235,6 +235,15 @@ function getOrCreateTrackUI(trackId) {
     waveContainer.className = 'waveform';
     waveContainer.id = `waveform-${trackId}`;
     
+    // ダブルバッファリング用のA面・B面レイヤー
+    const wsLayerA = document.createElement('div');
+    wsLayerA.className = 'ws-layer active';
+    wsLayerA.id = `ws-layer-a-${trackId}`;
+    
+    const wsLayerB = document.createElement('div');
+    wsLayerB.className = 'ws-layer inactive';
+    wsLayerB.id = `ws-layer-b-${trackId}`;
+    
     // オーバーレイを追加
     const overlayLeft = document.createElement('div');
     overlayLeft.className = 'overlay-left';
@@ -249,6 +258,8 @@ function getOrCreateTrackUI(trackId) {
     timeDisplay.id = `time-${trackId}`;
     timeDisplay.textContent = '00:00 / -00:00';
     
+    waveContainer.appendChild(wsLayerA);
+    waveContainer.appendChild(wsLayerB);
     waveContainer.appendChild(overlayLeft);
     waveContainer.appendChild(overlayRight);
     
@@ -258,8 +269,7 @@ function getOrCreateTrackUI(trackId) {
     
     waveformsContainer.appendChild(box);
 
-    const ws = WaveSurfer.create({
-        container: `#waveform-${trackId}`,
+    const wsOptions = {
         waveColor: '#ff9800',
         progressColor: '#e68900',
         cursorColor: '#fff',
@@ -269,10 +279,22 @@ function getOrCreateTrackUI(trackId) {
         height: 128,
         barGap: 1,
         interact: false // Prevent user clicking to seek
-    });
+    };
+
+    const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
+    const wsB = WaveSurfer.create({ container: `#ws-layer-b-${trackId}`, ...wsOptions });
 
     tracks[trackId] = {
-        ws: ws,
+        layers: {
+            A: { ws: wsA, el: wsLayerA, url: null },
+            B: { ws: wsB, el: wsLayerB, url: null }
+        },
+        activeLayerKey: 'A',
+        // ゲッター/セッターを用いて既存コードからの後方互換性を保つ
+        get ws() { return this.layers[this.activeLayerKey].ws; },
+        get loadedUrl() { return this.layers[this.activeLayerKey].url; },
+        set loadedUrl(url) { this.layers[this.activeLayerKey].url = url; },
+        
         infoEl: info,
         titleEl: title,
         boxEl: box,
@@ -293,9 +315,11 @@ function getOrCreateTrackUI(trackId) {
         markerData: null
     };
 
-    ws.on('ready', () => {
+    const onReady = () => {
         updateTrackMarkers(tracks[trackId]);
-    });
+    };
+    wsA.on('ready', onReady);
+    wsB.on('ready', onReady);
 
     return tracks[trackId];
 }
@@ -328,7 +352,6 @@ socket.on('clip_playing', (data) => {
         t.lastProgress = 0;
         t.currentProgress = undefined;
         t.justLooped = false;
-        t.loadedUrl = null;
     }
     
     t.infoEl.textContent = `Scene ${slotIndex + 1} `;
@@ -350,19 +373,35 @@ socket.on('clip_playing', (data) => {
     
     const url = `/audio?path=${encodeURIComponent(filePath)}`;
     
-    if (t.loadedUrl === url) {
-        // すでにロード中、またはロード済みの場合は重複実行を防ぐ
+    // すでにアクティブなレイヤーで読み込み済みの場合は何もしない
+    if (t.layers[t.activeLayerKey].url === url) {
         return;
     }
-    t.loadedUrl = url;
     
-    console.log(`Loading audio for Track ${trackId + 1}: ${url}`);
-    t.ws.load(url).catch(err => {
-        // シーンを高速で切り替えた際、前の読み込みがキャンセルされて出るエラー（AbortError）は正常な動作のため無視する
-        if (err.name !== 'AbortError') {
-            console.error('WaveSurfer load error:', err);
-        }
-    });
+    const inactiveKey = t.activeLayerKey === 'A' ? 'B' : 'A';
+    
+    // もし非アクティブなレイヤー（裏側）にプリロードされていれば、瞬時にスワップ（切り替え）する
+    if (t.layers[inactiveKey].url === url) {
+        const activeLayer = t.layers[t.activeLayerKey];
+        const inactiveLayer = t.layers[inactiveKey];
+        
+        // クラスを切り替えてフェードアニメーションを発動
+        activeLayer.el.classList.remove('active');
+        activeLayer.el.classList.add('inactive');
+        
+        inactiveLayer.el.classList.remove('inactive');
+        inactiveLayer.el.classList.add('active');
+        
+        t.activeLayerKey = inactiveKey;
+        console.log(`[Swap] Track ${trackId + 1} instantly switched to preloaded layer ${inactiveKey}`);
+    } else {
+        // プリロードされていなければ、従来通りアクティブなレイヤーにロードする
+        console.log(`[Load] Loading audio for Track ${trackId + 1}: ${url}`);
+        t.layers[t.activeLayerKey].url = url;
+        t.layers[t.activeLayerKey].ws.load(url).catch(err => {
+            if (err.name !== 'AbortError') console.error('WaveSurfer load error:', err);
+        });
+    }
 });
 
 socket.on('clip_stopped', (data) => {
@@ -373,9 +412,11 @@ socket.on('clip_stopped', (data) => {
         t.currentSceneIndex = -1;
         t.fileName = null;
         t.sceneName = null;
-        t.loadedUrl = null;
+        t.layers['A'].url = null;
+        t.layers['B'].url = null;
+        t.layers['A'].ws.empty();
+        t.layers['B'].ws.empty();
         updateTrackTitle(trackId);
-        t.ws.empty();
         
         // アニメーションを停止し、変数をリセット
         cancelAnimationFrame(t.animationFrameId);
@@ -549,10 +590,23 @@ socket.on('track_name', (data) => {
 socket.on('clip_preload', (data) => {
     const { trackId, filePath } = data;
     const url = `/audio?path=${encodeURIComponent(filePath)}`;
-    console.log(`[Preload] Downloading audio in background for Track ${trackId + 1}: ${url}`);
     
-    // fetchを使ってブラウザにキャッシュさせる（描画はしない）
-    fetch(url).catch(e => console.error('Preload fetch failed:', e));
+    const t = getOrCreateTrackUI(trackId);
+    
+    // すでにアクティブなレイヤーで読み込まれていれば無視
+    if (t.layers[t.activeLayerKey].url === url) return;
+    
+    const inactiveKey = t.activeLayerKey === 'A' ? 'B' : 'A';
+    const inactiveLayer = t.layers[inactiveKey];
+    
+    // すでに非アクティブレイヤーで読み込まれていれば無視
+    if (inactiveLayer.url === url) return;
+    
+    console.log(`[Preload] Decoding audio in background layer ${inactiveKey} for Track ${trackId + 1}: ${url}`);
+    inactiveLayer.url = url;
+    inactiveLayer.ws.load(url).catch(err => {
+        if (err.name !== 'AbortError') console.error('Preload WaveSurfer load error:', err);
+    });
 });
 
 // マーカー情報を受信したときの処理
