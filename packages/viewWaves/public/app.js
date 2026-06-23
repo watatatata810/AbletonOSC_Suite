@@ -377,8 +377,8 @@ function getOrCreateTrackUI(trackId) {
         cursorWidth: 2,
         height: 128,
         interact: false, // Prevent user clicking to seek
-        autoScroll: isAutoScrollEnabled,
-        autoCenter: isAutoScrollEnabled
+        autoScroll: autoScrollMode === 'center' || autoScrollMode === 'page',
+        autoCenter: autoScrollMode === 'center'
     };
 
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
@@ -770,7 +770,7 @@ const digitalClock = document.getElementById('digital-clock');
 const clockToggle = document.getElementById('clock-toggle');
 
 // グローバル設定変数
-let isAutoScrollEnabled = true;
+let autoScrollMode = 'center'; // 'center', 'page', 'off'
 
 // デジタル時計の表示・非表示切り替え
 if (clockToggle && digitalClock) {
@@ -782,17 +782,22 @@ if (clockToggle && digitalClock) {
 // ==========================================
 // 波形スクロール自動追従設定
 // ==========================================
-const autoScrollToggle = document.getElementById('autoscroll-toggle');
+const autoScrollModeSelect = document.getElementById('autoscroll-mode');
 
-if (autoScrollToggle) {
-    autoScrollToggle.addEventListener('change', (e) => {
-        isAutoScrollEnabled = e.target.checked;
-        
-        // 既存のすべての波形に追従設定を反映
-        Object.values(tracks).forEach(t => {
-            if (t.layers.A.ws) t.layers.A.ws.setOptions({ autoScroll: isAutoScrollEnabled, autoCenter: isAutoScrollEnabled });
-            if (t.layers.B.ws) t.layers.B.ws.setOptions({ autoScroll: isAutoScrollEnabled, autoCenter: isAutoScrollEnabled });
-        });
+function applyScrollModeToTracks() {
+    const autoScroll = autoScrollMode === 'center' || autoScrollMode === 'page';
+    const autoCenter = autoScrollMode === 'center';
+    
+    Object.values(tracks).forEach(t => {
+        if (t.layers.A.ws) t.layers.A.ws.setOptions({ autoScroll, autoCenter });
+        if (t.layers.B.ws) t.layers.B.ws.setOptions({ autoScroll, autoCenter });
+    });
+}
+
+if (autoScrollModeSelect) {
+    autoScrollModeSelect.addEventListener('change', (e) => {
+        autoScrollMode = e.target.value;
+        applyScrollModeToTracks();
     });
 }
 
