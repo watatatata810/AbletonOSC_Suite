@@ -281,23 +281,22 @@ waveformsContainer.addEventListener('wheel', (e) => {
 
         // 現在のウィンドウ幅と、表示されている最長トラックの時間を取得
         let maxDuration = 0;
-        const containerWidth = waveformsContainer.clientWidth || window.innerWidth;
+        const outerContainerWidth = waveformsContainer.clientWidth || window.innerWidth;
         Object.values(tracks).forEach(t => {
             const dur = (t.ws && t.ws.getDuration()) || 0;
             if (dur > maxDuration) maxDuration = dur;
         });
         
         // 「画面にピッタリ収まるときのピクセル/秒（px/sec）」を計算
-        const fitZoom = maxDuration > 0 ? (containerWidth / maxDuration) : 10;
+        const fitZoom = maxDuration > 0 ? (outerContainerWidth / maxDuration) : 10;
 
         // e.deltaY: 正の値はズームアウト（ピンチイン）、負の値はズームイン（ピンチアウト）
         const isZoomingIn = e.deltaY < 0;
         
-        // ズーム前の倍率を保持
-        const oldZoom = currentZoom;
+        // ズーム前の実効倍率を保持（0の場合はfitZoomを使う）
+        const oldEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
 
         // 初回ズームイン時（現在フィット表示で、拡大方向に操作された場合）
-        // 50などの固定値ではなく、現在のフィット倍率を基準に開始することでガクつきをなくす
         if (currentZoom === 0 && isZoomingIn) {
             currentZoom = fitZoom;
         }
@@ -309,16 +308,14 @@ waveformsContainer.addEventListener('wheel', (e) => {
             currentZoom *= zoomFactor;
 
             // 制限：一番引いた状態（fitZoom）に近づいたらフィット（0）にスナップさせる
-            if (currentZoom <= fitZoom * 1.05) {
+            // 閾値を1.2倍にすることで、タッチパッドの小さなdeltaYでも確実にズーム状態を維持する
+            if (currentZoom <= fitZoom * 1.2) {
                 currentZoom = 0; 
             } else if (currentZoom > MAX_ZOOM) {
                 currentZoom = MAX_ZOOM;
             }
 
-            // マウスカーソルの位置を中心としたズームを計算
-            const containerRect = waveformsContainer.getBoundingClientRect();
-            // コンテナ内でのマウスX座標 (0 ～ containerWidth)
-            const mouseX = Math.max(0, Math.min(e.clientX - containerRect.left, containerRect.width));
+            const newEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
 
             // 全トラックのA面・B面にズーム設定と、再計算したスクロール位置を適用
             Object.values(tracks).forEach(t => {
@@ -328,46 +325,40 @@ waveformsContainer.addEventListener('wheel', (e) => {
 
                 if (activeWs && activeWs.getDuration() > 0) {
                     const duration = activeWs.getDuration();
-                    const containerWidth = activeWs.getWrapper().clientWidth;
+                    const wrapper = activeWs.getWrapper();
+                    const wrapperRect = wrapper.getBoundingClientRect();
                     
-                    // ズーム前の全体幅とスクロール位置から、マウスが指している波形の「割合(0.0~1.0)」を計算
-                    const oldFullWidth = oldZoom === 0 ? containerWidth : (duration * oldZoom);
-                    const oldScrollLeft = activeWs.getScroll();
-                    const ratio = (oldScrollLeft + mouseX) / oldFullWidth;
+                    // マウスのX座標をWaveSurferラッパー基準で計算（各トラックごとに計算）
+                    const mouseXInWrapper = Math.max(0, e.clientX - wrapperRect.left);
+
+                    // ズーム前の全体幅とスクロール位置から、マウスが指している波形上の位置（ピクセル）を計算
+                    const oldFullWidth = duration * oldEffectiveZoom;
+                    const oldScrollLeft = wrapper.scrollLeft;
+                    const contentPosUnderMouse = oldScrollLeft + mouseXInWrapper;
 
                     // reRender のスクロール補正をスキップするフラグを立てる
                     if (wsA) wsA.renderer._skipScrollCorrection = true;
                     if (wsB) wsB.renderer._skipScrollCorrection = true;
 
-                    // ズーム倍率を適用 (0またはfalseの場合はフィット表示)
-                    // zoom() → reRender() が呼ばれるが、フラグにより scrollLeft 補正はスキップされる
+                    // ズーム倍率を適用
                     if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
                     if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
 
-                    // フラグを解除（通常の reRender に戻す）
+                    // フラグを解除
                     if (wsA) wsA.renderer._skipScrollCorrection = false;
                     if (wsB) wsB.renderer._skipScrollCorrection = false;
 
-                    // ズーム後の全体幅を用いて、同じ「割合」の箇所がマウス位置にくるような新しいスクロール位置を計算
-                    const newFullWidth = currentZoom === 0 ? containerWidth : (duration * currentZoom);
-                    const newScrollLeft = (ratio * newFullWidth) - mouseX;
+                    // ズーム後の全体幅を計算し、マウス下の同じ地点が同じ画面位置に来るようにスクロール
+                    const newFullWidth = duration * newEffectiveZoom;
+                    const scaledPos = contentPosUnderMouse * (newFullWidth / oldFullWidth);
+                    const newScrollLeft = Math.max(0, scaledPos - mouseXInWrapper);
 
-                    // スクロール補正がスキップされたので、ここで同期的にマウス位置へスクロールを適用できる
-                    if (wsA) wsA.setScroll(newScrollLeft);
-                    if (wsB) wsB.setScroll(newScrollLeft);
+                    wrapper.scrollLeft = newScrollLeft;
                 }
             });
         }
-    } else {
-        // Ctrlキーがない場合＝通常の横スクロール操作
-        // ユーザーが自発的に波形を見ようとしているため、一時的に自動追従を停止する
-        isUserScrolling = true;
-        if (scrollTimeout) clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-            isUserScrolling = false; // 3秒後に自動追従を再開
-        }, 3000);
     }
-}, { passive: false }); // preventDefault() を機能させるために passive: false を指定
+}, { passive: false });
 
 socket.on('connect', () => {
     document.body.className = 'status-waiting';

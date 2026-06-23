@@ -180,7 +180,8 @@ button:active {
     height: 128px;
     background-color: #121212;
     border-radius: 4px;
-    overflow: hidden;
+    overflow-x: clip;   /* ズーム時にWaveSurferラッパーが親からはみ出さないよう制限 */
+    overflow-y: hidden;
 }
 
 .ws-layer {
