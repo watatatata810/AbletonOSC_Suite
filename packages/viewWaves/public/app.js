@@ -313,7 +313,10 @@ function applyPendingZoom() {
         const zoomFactor = 1 + (accumulatedDelta * -0.005);
         currentZoom *= zoomFactor;
 
-        if (currentZoom <= fitZoom * 1.2) {
+        // fitZoom以下に下がった場合のみフィット表示(0)にスナップする
+        // （以前は fitZoom * 1.2 の閾値だったが、タッチパッドの微小deltaYでは
+        //   ズーム直後にスナップバックしてしまい、実質ズームが効かなかった）
+        if (currentZoom <= fitZoom) {
             currentZoom = 0;
         } else if (currentZoom > MAX_ZOOM) {
             currentZoom = MAX_ZOOM;
