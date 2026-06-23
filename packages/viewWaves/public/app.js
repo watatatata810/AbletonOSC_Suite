@@ -331,7 +331,7 @@ socket.on('clip_playing', (data) => {
         t.loadedUrl = null;
     }
     
-    t.infoEl.textContent = `Scene ${slotIndex + 1} 再生中`;
+    t.infoEl.textContent = `Scene ${slotIndex + 1} `;
     t.currentSceneIndex = slotIndex;
     
     // ファイルパスからファイル名を抽出 (Windowsの\とMacの/両対応)
@@ -415,7 +415,7 @@ socket.on('song_playing', () => {
         if (t.currentSceneIndex >= 0) {
             // 再生中のクリップがあるトラックのみ再表示
             t.boxEl.classList.add('visible');
-            t.infoEl.textContent = `Scene ${t.currentSceneIndex + 1} 再生中`;
+            t.infoEl.textContent = `Scene ${t.currentSceneIndex + 1} `;
             // 再生再開・再トリガー時にAbletonの実際の位置から同期し直すためリセット
             // 次の clip_position イベントで firstPositionTime と baseProgress が正しく設定される
             t.firstPositionTime = undefined;
