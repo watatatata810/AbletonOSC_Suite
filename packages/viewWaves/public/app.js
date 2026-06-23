@@ -294,9 +294,9 @@ socket.on('clip_position', (data) => {
         
         const now = performance.now();
         
-        // 初回、または大きなジャンプ（ループやシークなど、前回の位置から0.05以上離れた場合）を検出
-        // ※Abletonのprogressは不正確な場合があるため、あくまで「どこから再生を開始したか」の目安としてだけ使います
-        if (t.firstPositionTime === undefined || Math.abs(progress - (t.lastProgress || 0)) > 0.05) {
+        // 初回、大きな前方ジャンプ（シーク等）、または「過去への巻き戻り（ループや再トリガー）」を確実に検出
+        // ※以前は5%以上のジャンプのみを検出していたため、曲の序盤（数秒以内）で再トリガーした際に巻き戻りを検知できず波形が戻らないバグが発生していました
+        if (t.firstPositionTime === undefined || (progress - (t.lastProgress || 0)) > 0.05 || progress < (t.lastProgress || 0) - 0.001) {
             t.firstPositionTime = now;
             t.baseProgress = progress; // シーク時の基準位置
             t.justLooped = true;
