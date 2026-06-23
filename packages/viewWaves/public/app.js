@@ -242,36 +242,48 @@ function sortVisibleTracks() {
 // 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
 // ----------------------------------------------------
 let currentZoom = 0; // 0 = 画面幅にフィット
-const MIN_ZOOM = 10; // 最小のズーム倍率 (px/sec)
-const MAX_ZOOM = 500; // 最大のズーム倍率 (px/sec)
-const DEFAULT_ZOOM = 50; // 最初にズームインしたときの基準倍率
+const MAX_ZOOM = 1000; // 最大のズーム倍率 (px/sec)
 
 waveformsContainer.addEventListener('wheel', (e) => {
     // Ctrlキーが押されている場合（ピンチ操作もこれに該当するブラウザが多い）
     if (e.ctrlKey) {
         e.preventDefault(); // 画面全体の拡大縮小を防ぐ
 
+        // 現在のウィンドウ幅と、表示されている最長トラックの時間を取得
+        let maxDuration = 0;
+        const containerWidth = waveformsContainer.clientWidth || window.innerWidth;
+        Object.values(tracks).forEach(t => {
+            const dur = (t.ws && t.ws.getDuration()) || 0;
+            if (dur > maxDuration) maxDuration = dur;
+        });
+        
+        // 「画面にピッタリ収まるときのピクセル/秒（px/sec）」を計算
+        const fitZoom = maxDuration > 0 ? (containerWidth / maxDuration) : 10;
+
         // e.deltaY: 正の値はズームアウト（ピンチイン）、負の値はズームイン（ピンチアウト）
-        const zoomDelta = e.deltaY * -0.5; // 感度調整
+        const isZoomingIn = e.deltaY < 0;
 
         // 初回ズームイン時（現在フィット表示で、拡大方向に操作された場合）
-        if (currentZoom === 0 && zoomDelta > 0) {
-            currentZoom = DEFAULT_ZOOM;
+        // 50などの固定値ではなく、現在のフィット倍率を基準に開始することでガクつきをなくす
+        if (currentZoom === 0 && isZoomingIn) {
+            currentZoom = fitZoom;
         }
 
         // ズーム中、またはフィット状態からのズームインの場合のみ処理
-        if (currentZoom !== 0 || zoomDelta > 0) {
-            currentZoom += zoomDelta;
+        if (currentZoom !== 0 || isZoomingIn) {
+            // 現在の倍率に対する割合でズームさせる（指数関数的変化）ことで、滑らかさを保つ
+            const zoomFactor = 1 + (e.deltaY * -0.005);
+            currentZoom *= zoomFactor;
 
-            // 制限
-            if (currentZoom < MIN_ZOOM) {
-                currentZoom = 0; // 一定以下になったらフィットに戻す
+            // 制限：一番引いた状態（fitZoom）に近づいたらフィット（0）にスナップさせる
+            if (currentZoom <= fitZoom * 1.05) {
+                currentZoom = 0; 
             } else if (currentZoom > MAX_ZOOM) {
                 currentZoom = MAX_ZOOM;
             }
 
             // 全トラックのA面・B面にズーム設定を適用
-            // zoom(0) の場合は WaveSurfer はデフォルトのフィット表示に戻る
+            // zoom(0) または false の場合は WaveSurfer はデフォルトのフィット表示に戻る
             Object.values(tracks).forEach(t => {
                 if (t.layers.A.ws) t.layers.A.ws.zoom(currentZoom === 0 ? false : currentZoom);
                 if (t.layers.B.ws) t.layers.B.ws.zoom(currentZoom === 0 ? false : currentZoom);
