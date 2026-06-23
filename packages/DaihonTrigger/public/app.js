@@ -868,6 +868,12 @@ container.addEventListener('touchstart', (e) => {
         momentumId = null;
     }
 
+    // タッチ状態変数を確実に初期化（前回の操作状態が残ってパン/ズームに誤爆するのを防ぐ）
+    isPanning = false;
+    isThreeFingerPan = false;
+    isPinching = false;
+    container._potentialPan = false;
+
     if (e.touches.length >= 3) {
         pasteTouchCanceled = true;
         isPinching = false;
@@ -1364,9 +1370,166 @@ if (btnUpload && inputUpload) {
             const arrayBuffer = await file.arrayBuffer();
             const safeBlob = new Blob([arrayBuffer], { type: file.type || 'application/pdf' });
             
+            // --- PDFメタデータ（アノテーション）からマークアップデータを抽出 ---
+            let extractedPagesData = {};
+            let hasMetadata = false;
+            let annotCount = 0;
+            let metaCount = 0;
+            let uploadBlob = safeBlob; // デフォルトは元のBlob（エラー時のフォールバック用）
+            try {
+                const { PDFDocument, PDFName } = PDFLib;
+                const pdfDocLib = await PDFDocument.load(arrayBuffer);
+                const pages = pdfDocLib.getPages();
+                
+                for (let i = 0; i < pages.length; i++) {
+                    const pageNum = i + 1;
+                    const page = pages[i];
+                    extractedPagesData[pageNum] = { version: "5.3.0", objects: [] };
+                    
+                    const annots = page.node.get(PDFName.of('Annots'));
+                    if (annots) {
+                        const resolvedAnnots = pdfDocLib.context.lookup(annots);
+                        if (resolvedAnnots && typeof resolvedAnnots.size === 'function') {
+                            const keepAnnots = [];
+                            for (let j = 0; j < resolvedAnnots.size(); j++) {
+                                annotCount++;
+                                const annotRef = resolvedAnnots.get(j);
+                                const annot = pdfDocLib.context.lookup(annotRef);
+                                let isOurAnnot = false;
+                                if (annot) {
+                                    const metaObj = annot.get(PDFName.of('DaihonTriggerData'));
+                                    if (metaObj) {
+                                        isOurAnnot = true;
+                                        metaCount++;
+                                        const resolvedMetaObj = pdfDocLib.context.lookup(metaObj);
+                                        let base64Str = '';
+                                        if (resolvedMetaObj && typeof resolvedMetaObj.decodeText === 'function') {
+                                            base64Str = resolvedMetaObj.decodeText();
+                                        } else if (resolvedMetaObj && resolvedMetaObj.asString) {
+                                            base64Str = resolvedMetaObj.asString();
+                                        } else if (resolvedMetaObj) {
+                                            base64Str = resolvedMetaObj.value || '';
+                                        }
+                                        
+                                        if (base64Str) {
+                                            const meta = JSON.parse(decodeURIComponent(escape(atob(base64Str))));
+                                            
+                                            if (meta.isTrigger) {
+                                                // トリガーボタンのFabricグループオブジェクトを再構築
+                                                const groupObj = {
+                                                    type: "group",
+                                                    version: "5.3.0",
+                                                    originX: "center",
+                                                    originY: "center",
+                                                    left: meta.left,
+                                                    top: meta.top,
+                                                    width: meta.width,
+                                                    height: meta.height,
+                                                    scaleX: meta.scaleX,
+                                                    scaleY: meta.scaleY,
+                                                    hasControls: true,
+                                                    hasBorders: true,
+                                                    objectCaching: false,
+                                                    isTrigger: true,
+                                                    isSceneTrigger: meta.isSceneTrigger,
+                                                    trackNum: meta.trackNum,
+                                                    sceneNum: meta.sceneNum,
+                                                    objects: [
+                                                        {
+                                                            type: "rect",
+                                                            version: "5.3.0",
+                                                            originX: "center",
+                                                            originY: "center",
+                                                            left: 0,
+                                                            top: 0,
+                                                            width: 280,
+                                                            height: 100,
+                                                            fill: meta.isSceneTrigger ? "#007aff" : "#ff2d55",
+                                                            rx: 20,
+                                                            ry: 20,
+                                                            shadow: { color: "rgba(0,0,0,0.5)", blur: 10, offsetX: 4, offsetY: 4 },
+                                                            objectCaching: false
+                                                        },
+                                                        {
+                                                            type: "text",
+                                                            version: "5.3.0",
+                                                            originX: "center",
+                                                            originY: "center",
+                                                            left: 0,
+                                                            top: 0,
+                                                            text: meta.labelText,
+                                                            fontSize: 48,
+                                                            fill: "#ffffff",
+                                                            fontWeight: "bold",
+                                                            fontFamily: "\"Hiragino Kaku Gothic ProN\", \"Meiryo\", sans-serif",
+                                                            textAlign: "center",
+                                                            objectCaching: false,
+                                                            styles: {}
+                                                        }
+                                                    ]
+                                                };
+                                                extractedPagesData[pageNum].objects.push(groupObj);
+                                                hasMetadata = true;
+                                            } else if (meta.isPath) {
+                                                // 手書きパスのFabricオブジェクトを再構築
+                                                const pathObj = {
+                                                    type: "path",
+                                                    version: "5.3.0",
+                                                    left: meta.left,
+                                                    top: meta.top,
+                                                    width: meta.width,
+                                                    height: meta.height,
+                                                    scaleX: meta.scaleX,
+                                                    scaleY: meta.scaleY,
+                                                    stroke: meta.stroke,
+                                                    strokeWidth: meta.strokeWidth,
+                                                    fill: null,
+                                                    strokeLineCap: "round",
+                                                    strokeLineJoin: "round",
+                                                    path: meta.path,
+                                                    selectable: true,
+                                                    evented: true,
+                                                    perPixelTargetFind: false,
+                                                    padding: 10
+                                                };
+                                                extractedPagesData[pageNum].objects.push(pathObj);
+                                                hasMetadata = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (!isOurAnnot) {
+                                    keepAnnots.push(annotRef);
+                                }
+                            }
+                            
+                            // 抽出されたアノテーション（トリガー・手書き）をPDF背景から削除
+                            if (keepAnnots.length === 0) {
+                                page.node.delete(PDFName.of('Annots'));
+                            } else {
+                                const newAnnotsArray = pdfDocLib.context.obj(keepAnnots);
+                                page.node.set(PDFName.of('Annots'), newAnnotsArray);
+                            }
+                        }
+                    }
+                }
+                
+                // クリーンアップ成功した場合は、アノテーションを削除したPDFをアップロード用とする
+                const cleanPdfBytes = await pdfDocLib.save();
+                uploadBlob = new Blob([cleanPdfBytes], { type: 'application/pdf' });
+                
+                alert(`[Debug] アノテーション総数=${annotCount}, メタデータ検出数=${metaCount}, hasMetadata=${hasMetadata}`);
+            } catch (err) {
+                console.error('[Metadata Error] アノテーションからのデータ抽出に失敗しました:', err);
+                alert('[Metadata Error] アノテーション解析エラー: ' + err.message + '\n' + err.stack);
+            }
+            
             const formData = new FormData();
             // multerでの文字化けを完全に防ぐため、ファイル名をURLエンコードして送信する
-            formData.append('pdf', safeBlob, encodeURIComponent(file.name));
+            formData.append('pdf', uploadBlob, encodeURIComponent(file.name));
+            if (hasMetadata) {
+                formData.append('pagesData', JSON.stringify(extractedPagesData));
+            }
             
             btnUpload.textContent = 'アップロード中...';
 
@@ -1447,7 +1610,8 @@ if (btnExport) {
             const pdfDocLib = await PDFDocument.load(existingPdfBytes);
             const pages = pdfDocLib.getPages();
             
-            // 2. 各ページのFabric上のオブジェクト（手書き・ボタン）を透過PNGとして埋め込む
+            // 2. 各ページのFabric上のオブジェクト（手書き・ボタン）をアノテーションとして埋め込む
+            const { PDFName, PDFString, PDFHexString } = PDFLib;
             for (let num = 1; num <= pages.length; num++) {
                 const page = pages[num - 1];
                 const pageHeight = page.getHeight();
@@ -1455,35 +1619,197 @@ if (btnExport) {
                 if (!canvas) continue;
                 
                 const objects = canvas.getObjects();
+                const pageAnnots = [];
+                
                 for (const obj of objects) {
-                    // Fabricの描画スケール（1.5）を元のPDFサイズに戻す係数
                     const pdfScale = 1 / scale; 
                     
-                    // オブジェクト単体を高画質の背景透過PNGとして書き出し
-                    const dataUrl = obj.toDataURL({ format: 'png', multiplier: 3 });
-                    const imgBytes = await fetch(dataUrl).then(res => res.arrayBuffer());
-                    const img = await pdfDocLib.embedPng(imgBytes);
+                    // オブジェクトのバウンディングボックスを取得（Fabric座標系）
+                    const bound = obj.getBoundingRect();
+                    const w = bound.width * pdfScale;
+                    const h = bound.height * pdfScale;
+                    const pdfX = bound.left * pdfScale;
+                    const pdfY = pageHeight - (bound.top + bound.height) * pdfScale;
+                    const rectCoords = [pdfX, pdfY, pdfX + w, pdfY + h];
                     
-                    const w = obj.getScaledWidth() * pdfScale;
-                    const h = obj.getScaledHeight() * pdfScale;
-                    
-                    let cx = obj.left * pdfScale;
-                    let cy = obj.top * pdfScale;
-                    
-                    // originが 'left' / 'top' の場合、中心座標に補正する（手書きパス等）
-                    if (obj.originX === 'left') cx += (w / 2);
-                    if (obj.originY === 'top') cy += (h / 2);
-                    
-                    // PDFは左下が原点 (0,0) なのでY座標を反転。drawImageの起点は左下
-                    const pdfX = cx - (w / 2);
-                    const pdfY = pageHeight - cy - (h / 2);
-                    
-                    page.drawImage(img, { 
-                        x: pdfX, 
-                        y: pdfY, 
-                        width: w, 
-                        height: h 
-                    });
+                    if (obj.isTrigger) {
+                        // --- トリガーボタン: FreeText Annotation ---
+                        const textObj = obj.getObjects().find(o => o.type === 'text');
+                        const labelText = textObj ? textObj.text : '';
+                        
+                        const triggerMeta = {
+                            isTrigger: true,
+                            isSceneTrigger: obj.isSceneTrigger,
+                            trackNum: obj.trackNum,
+                            sceneNum: obj.sceneNum,
+                            labelText: labelText,
+                            left: obj.left,
+                            top: obj.top,
+                            width: obj.width,
+                            height: obj.height,
+                            scaleX: obj.scaleX,
+                            scaleY: obj.scaleY
+                        };
+                        
+                        const colorHex = obj.isSceneTrigger ? [0, 0.48, 1.0] : [1.0, 0.17, 0.33]; // #007aff / #ff2d55 のRGB
+                        
+                        // --- 1. Fabricオブジェクトから高解像度PNG画像を切り出す ---
+                        const dataUrl = obj.toDataURL({
+                            format: 'png',
+                            quality: 1,
+                            multiplier: 2 // 高画質化（レティナ対応）
+                        });
+                        const base64Data = dataUrl.split(',')[1];
+                        const pngBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                        
+                        // --- 2. pdf-libに画像を埋め込み、アピアランスストリームに登録 ---
+                        const pngImage = await pdfDocLib.embedPng(pngBytes);
+                        
+                        const apContent = `\nq\n${w.toFixed(2)} 0 0 ${h.toFixed(2)} 0 0 cm\n/Img0 Do\nQ\n`;
+                        const apContentBytes = new TextEncoder().encode(apContent);
+                        
+                        const apDict = pdfDocLib.context.obj({
+                            Type: PDFName.of('XObject'),
+                            Subtype: PDFName.of('Form'),
+                            FormType: 1,
+                            BBox: [0, 0, w, h],
+                            Resources: {
+                                XObject: {
+                                    Img0: pngImage.ref
+                                }
+                            },
+                            Length: apContentBytes.length
+                        });
+                        
+                        const apStream = pdfDocLib.context.stream(apContentBytes, apDict);
+                        const apRef = pdfDocLib.context.register(apStream);
+                        
+                        const freeTextAnnot = pdfDocLib.context.obj({
+                            Type: 'Annot',
+                            Subtype: 'FreeText',
+                            Rect: rectCoords,
+                            Contents: PDFHexString.fromText(labelText),
+                            DA: PDFString.of('/Helv 12 Tf 1 1 1 rg'), // 白文字, 12pt, Helvetica
+                            C: colorHex, // 背景色
+                            Q: 1, // 中央揃え
+                            BS: {
+                                Type: 'Border',
+                                W: 0 // 枠なし
+                            },
+                            AP: {
+                                N: apRef
+                            },
+                            DaihonTriggerData: PDFString.of(btoa(unescape(encodeURIComponent(JSON.stringify(triggerMeta)))))
+                        });
+                        
+                        const annotRef = pdfDocLib.context.register(freeTextAnnot);
+                        pageAnnots.push(annotRef);
+                        
+                    } else if (obj.type === 'path') {
+                        // --- 手書き線: Ink Annotation ---
+                        const pathData = obj.path;
+                        const inkPoints = [];
+                        pathData.forEach(cmd => {
+                            if (cmd.length >= 3) {
+                                const px = cmd[cmd.length - 2];
+                                const py = cmd[cmd.length - 1];
+                                const pdfPx = px * pdfScale;
+                                const pdfPy = pageHeight - py * pdfScale;
+                                inkPoints.push(pdfPx, pdfPy);
+                            }
+                        });
+                        
+                        if (inkPoints.length >= 2) {
+                            const color = obj.stroke || 'rgba(255,0,0,0.7)';
+                            let rgb = [1.0, 0.0, 0.0];
+                            const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                            if (match) {
+                                rgb = [parseInt(match[1])/255, parseInt(match[2])/255, parseInt(match[3])/255];
+                            }
+                            
+                            const pathMeta = {
+                                isPath: true,
+                                path: obj.path,
+                                stroke: obj.stroke,
+                                strokeWidth: obj.strokeWidth,
+                                left: obj.left,
+                                top: obj.top,
+                                width: obj.width,
+                                height: obj.height,
+                                scaleX: obj.scaleX,
+                                scaleY: obj.scaleY
+                            };
+                            
+                            // 手書き線用のアピアランスストリーム（AP）を作成（iOS標準プレビュー等での表示互換性のため）
+                            let apContent = `\nq\n${rgb[0]} ${rgb[1]} ${rgb[2]} RG\n${(obj.strokeWidth || 3) * pdfScale} w\n`;
+                            let isFirst = true;
+                            pathData.forEach(cmd => {
+                                if (cmd.length >= 3) {
+                                    const px = cmd[cmd.length - 2];
+                                    const py = cmd[cmd.length - 1];
+                                    const pdfPx = px * pdfScale;
+                                    const pdfPy = pageHeight - py * pdfScale;
+                                    // ローカル座標に変換
+                                    const localX = pdfPx - pdfX;
+                                    const localY = pdfPy - pdfY;
+                                    
+                                    if (isFirst) {
+                                        apContent += `${localX.toFixed(2)} ${localY.toFixed(2)} m\n`;
+                                        isFirst = false;
+                                    } else {
+                                        apContent += `${localX.toFixed(2)} ${localY.toFixed(2)} l\n`;
+                                    }
+                                }
+                            });
+                            apContent += `S\nQ\n`;
+                            const apContentBytes = new TextEncoder().encode(apContent);
+                            
+                            const apDict = pdfDocLib.context.obj({
+                                Type: PDFName.of('XObject'),
+                                Subtype: PDFName.of('Form'),
+                                FormType: 1,
+                                BBox: [0, 0, w, h],
+                                Resources: {},
+                                Length: apContentBytes.length
+                            });
+                            
+                            const apStream = pdfDocLib.context.stream(apContentBytes, apDict);
+                            const apRef = pdfDocLib.context.register(apStream);
+                            
+                            const inkAnnot = pdfDocLib.context.obj({
+                                Type: 'Annot',
+                                Subtype: 'Ink',
+                                Rect: rectCoords,
+                                InkList: [inkPoints],
+                                C: rgb, // 線の色
+                                BS: {
+                                    Type: 'Border',
+                                    W: (obj.strokeWidth || 3) * pdfScale
+                                },
+                                AP: {
+                                    N: apRef
+                                },
+                                DaihonTriggerData: PDFString.of(btoa(unescape(encodeURIComponent(JSON.stringify(pathMeta)))))
+                            });
+                            
+                            const annotRef = pdfDocLib.context.register(inkAnnot);
+                            pageAnnots.push(annotRef);
+                        }
+                    }
+                }
+                
+                // ページのアノテーションリストへ登録
+                if (pageAnnots.length > 0) {
+                    const { PDFArray } = PDFLib;
+                    let annots = page.node.get(PDFName.of('Annots'));
+                    if (!annots) {
+                        annots = pdfDocLib.context.obj([]);
+                        page.node.set(PDFName.of('Annots'), annots);
+                    }
+                    const resolvedAnnots = pdfDocLib.context.lookup(annots);
+                    if (resolvedAnnots instanceof PDFArray) {
+                        pageAnnots.forEach(ref => resolvedAnnots.push(ref));
+                    }
                 }
             }
             
@@ -1505,34 +1831,16 @@ if (btnExport) {
                 await writable.write(blob);
                 await writable.close();
             } else {
-                // 非対応ブラウザ (モバイルAndroid/iOSなど) の場合、
-                // まず Web Share API を使用して、OSネイティブの「ファイルに保存」メニューを呼び出す
-                let shared = false;
-                const file = new File([blob], defaultFilename, { type: 'application/pdf' });
-                
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    try {
-                        await navigator.share({
-                            files: [file],
-                            title: 'Exported PDF'
-                        });
-                        shared = true; // 共有成功
-                    } catch (err) {
-                        console.log('Share canceled or failed', err);
-                    }
-                }
-                
-                if (!shared) {
-                    // Share機能が使えない、またはキャンセルされた場合の最終フォールバック（強制ダウンロード）
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = defaultFilename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }
+                // iOSのWeb Share APIによる共有時のアノテーション自動消去を回避するため、
+                // モバイル環境でも強制的にブラウザからの直接ダウンロードを実行します。
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = defaultFilename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
             }
             
         } catch (err) {
@@ -1614,3 +1922,30 @@ btnCtxPaste.addEventListener('click', () => {
         saveCurrentPage(contextTargetCanvasNum);
     }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
 });
+
+// --- タッチ・ドラッグ・消しゴム操作の終了時の状態強制クリア（iOS等でのワープ防止） ---
+const clearAllActiveDrags = () => {
+    // SELECTモードでドラッグ中の場合のみクリア処理を実行する
+    if (currentMode === MODES.SELECT) {
+        if (activeDragObject) {
+            dragGhost.style.display = 'none';
+            activeDragObject.set('opacity', 1);
+            activeDragObject = null;
+            activeDragStartCanvasNum = null;
+        }
+        Object.values(fabricCanvases).forEach(canvas => {
+            if (canvas._currentTransform) {
+                canvas._currentTransform = null;
+                canvas.requestRenderAll();
+            }
+            canvas.isDragging = false;
+        });
+        pasteTouchStartCoords = null;
+        pasteTouchCanceled = false;
+        touchTargetObject = null;
+    }
+};
+
+window.addEventListener('mouseup', clearAllActiveDrags);
+window.addEventListener('touchend', clearAllActiveDrags);
+window.addEventListener('pointerup', clearAllActiveDrags);

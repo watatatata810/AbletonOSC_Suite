@@ -65,6 +65,27 @@ app.post('/upload-pdf', upload.single('pdf'), (req, res) => {
 
     console.log(`[PDF Upload] 新しいPDFがアップロードされ、アクティブになりました: ${activePdfName}`);
     
+    // 送信されたマークアップメタデータがあれば、project_data.json に保存
+    if (req.body.pagesData) {
+        try {
+            const uploadedPagesData = JSON.parse(req.body.pagesData);
+            
+            let currentData = {};
+            if (fs.existsSync(DATA_FILE)) {
+                try {
+                    currentData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+                } catch (e) {}
+            }
+            
+            currentData[activePdfName] = uploadedPagesData;
+            
+            fs.writeFileSync(DATA_FILE, JSON.stringify(currentData));
+            console.log(`[PDF Upload] PDF内から抽出したマークアップデータ (${Object.keys(uploadedPagesData).length}ページ分) を保存しました。`);
+        } catch (err) {
+            console.error('[PDF Upload] マークアップメタデータの解析または保存に失敗しました:', err);
+        }
+    }
+    
     // PC側の容量圧迫を防ぐため、過去の不要なPDFを削除（クリーンアップ）
     const assetsDir = path.join(__dirname, 'public', 'assets');
     if (fs.existsSync(assetsDir)) {
