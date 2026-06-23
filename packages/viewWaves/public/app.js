@@ -203,23 +203,22 @@ function updatePlayheadUI(trackId, progress) {
         // OSC通信による手動でのseekTo実行時は、WaveSurfer標準のautoCenterが機能しないため
         // ここで自前で追従モードに応じたスクロール制御を行う
         if (autoScrollMode !== 'off') {
-            const wrapper = t.ws.getWrapper();
-            // WaveSurfer V7 は Shadow DOM を使用しているため、内部のスクロールコンテナを取得する
-            const scrollContainer = wrapper && wrapper.shadowRoot ? wrapper.shadowRoot.querySelector('div') : null;
+            const containerWidth = t.ws.getWrapper().clientWidth;
+            const duration = t.ws.getDuration();
             
-            if (scrollContainer) {
-                const containerWidth = scrollContainer.clientWidth;
-                const fullWidth = scrollContainer.scrollWidth;
+            if (duration > 0) {
+                // 現在のズーム倍率(px/sec)から波形全体のピクセル幅を計算（フィット状態ならコンテナ幅と同じ）
+                const fullWidth = currentZoom > 0 ? (duration * currentZoom) : containerWidth;
                 const cursorX = fullWidth * progress;
 
                 if (autoScrollMode === 'center') {
                     // 中央固定: 常にプレイヘッドが中央にくるようにスクロール
-                    scrollContainer.scrollLeft = cursorX - (containerWidth / 2);
+                    t.ws.setScroll(cursorX - (containerWidth / 2));
                 } else if (autoScrollMode === 'page') {
                     // ページ切替: プレイヘッドが画面外に出たらページを切り替える
-                    const currentScroll = scrollContainer.scrollLeft;
+                    const currentScroll = t.ws.getScroll();
                     if (cursorX < currentScroll || cursorX > currentScroll + containerWidth) {
-                        scrollContainer.scrollLeft = cursorX;
+                        t.ws.setScroll(cursorX);
                     }
                 }
             }
