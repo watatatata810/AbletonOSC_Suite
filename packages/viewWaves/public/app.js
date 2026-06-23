@@ -204,19 +204,22 @@ function updatePlayheadUI(trackId, progress) {
         // ここで自前で追従モードに応じたスクロール制御を行う
         if (autoScrollMode !== 'off') {
             const wrapper = t.ws.getWrapper();
-            if (wrapper) {
-                const containerWidth = wrapper.clientWidth;
-                const fullWidth = wrapper.scrollWidth;
+            // WaveSurfer V7 は Shadow DOM を使用しているため、内部のスクロールコンテナを取得する
+            const scrollContainer = wrapper && wrapper.shadowRoot ? wrapper.shadowRoot.querySelector('div') : null;
+            
+            if (scrollContainer) {
+                const containerWidth = scrollContainer.clientWidth;
+                const fullWidth = scrollContainer.scrollWidth;
                 const cursorX = fullWidth * progress;
 
                 if (autoScrollMode === 'center') {
                     // 中央固定: 常にプレイヘッドが中央にくるようにスクロール
-                    wrapper.scrollLeft = cursorX - (containerWidth / 2);
+                    scrollContainer.scrollLeft = cursorX - (containerWidth / 2);
                 } else if (autoScrollMode === 'page') {
                     // ページ切替: プレイヘッドが画面外に出たらページを切り替える
-                    const currentScroll = wrapper.scrollLeft;
+                    const currentScroll = scrollContainer.scrollLeft;
                     if (cursorX < currentScroll || cursorX > currentScroll + containerWidth) {
-                        wrapper.scrollLeft = cursorX;
+                        scrollContainer.scrollLeft = cursorX;
                     }
                 }
             }
