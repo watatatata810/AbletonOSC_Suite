@@ -118,13 +118,19 @@ function calculateMarkerPercentages(markerData, durationSec) {
  * タイマー表示用の文字列を生成する
  * @param {number} extrapolatedProgress 現在の進行割合 (0.0〜1.0)
  * @param {number} durationMs 音声ファイルの実時間 (ms)
+ * @param {number} startPct マーカーの開始割合 (0.0〜1.0)
+ * @param {number} endPct マーカーの終了割合 (0.0〜1.0)
  * @returns {string} フォーマットされた時間文字列
  */
-function calculateTimeDisplay(extrapolatedProgress, durationMs) {
+function calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct) {
     if (durationMs <= 0) return "00:00 / -00:00";
 
-    const elapsedSec = (extrapolatedProgress * durationMs) / 1000;
-    const remainingSec = ((1 - extrapolatedProgress) * durationMs) / 1000;
+    // 再生区間（スタート〜エンド）に対する相対的な進行度
+    const elapsedProgress = Math.max(0, extrapolatedProgress - startPct);
+    const remainingProgress = Math.max(0, endPct - Math.max(startPct, extrapolatedProgress));
+
+    const elapsedSec = (elapsedProgress * durationMs) / 1000;
+    const remainingSec = (remainingProgress * durationMs) / 1000;
 
     const elMin = Math.floor(elapsedSec / 60);
     const elSec = Math.floor(elapsedSec % 60);
@@ -481,7 +487,9 @@ function animateCursor(trackId) {
     t.currentProgress = extrapolatedProgress;
     
     // 時間表示の更新
-    const timeText = calculateTimeDisplay(extrapolatedProgress, durationMs);
+    const startPct = t.startPct || 0;
+    const endPct = t.endPct || 1;
+    const timeText = calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct);
     updateTimerUI(trackId, timeText);
     
     // WaveSurferのカーソルを進める
