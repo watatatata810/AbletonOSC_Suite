@@ -271,7 +271,10 @@ socket.on('song_playing', () => {
             // 再生中のクリップがあるトラックのみ再表示
             t.boxEl.classList.add('visible');
             t.infoEl.textContent = `Scene ${t.currentSceneIndex + 1} 再生中`;
-            // ※アニメーションの再開は直後に来る clip_position イベントによって自動的に行われます
+            // 再生再開・再トリガー時にAbletonの実際の位置から同期し直すためリセット
+            // 次の clip_position イベントで firstPositionTime と baseProgress が正しく設定される
+            t.firstPositionTime = undefined;
+            t.currentProgress = undefined;
         }
     });
     updateEmptyState();
@@ -298,6 +301,7 @@ socket.on('clip_position', (data) => {
             t.baseProgress = progress; // シーク時の基準位置
             t.justLooped = true;
             t.currentOffsetProgress = undefined; // オフセット履歴もリセット
+            t.currentProgress = undefined;       // 後退防止ガードもリセット（同シーン再トリガー対応）
         }
         
         // Abletonからの進行度は基準として保持（ローカルアニメーションの絶対的な速度計算には使わない）
@@ -442,11 +446,13 @@ function updateTrackMarkers(t) {
     
     if (t.markerData.isWarped) {
         // ワープされている場合：拍（Beats）ベースで計算
+        // totalBeatsはWaveSurferの実ファイル長×テンポで算出する
+        // ※clip.lengthはAbletonのループ長であり音声ファイル全体のビート長ではないため使用しない
         const totalBeats = durationSec * (t.markerData.tempo / 60);
         if (totalBeats > 0) {
-            // loopEndがendMarkerより小さい場合、ユーザーが操作しているのはloopEnd
-            // isLoopingフラグに関係なく、より短い方を実効エンドとして使用する
-            const actualEnd = (t.markerData.loopEnd && t.markerData.loopEnd < t.markerData.endMarker)
+            // AbletonOSCの仕様対応：非ループ時でもエンドポイントを動かすとloop_endが変化するため、
+            // isLoopingのON/OFFに関わらず「より手前にあるマーカー」を常に実質的なエンドとする
+            const actualEnd = (t.markerData.loopEnd !== undefined && t.markerData.loopEnd < t.markerData.endMarker)
                 ? t.markerData.loopEnd
                 : t.markerData.endMarker;
             startPct = Math.max(0, t.markerData.startMarker / totalBeats);
@@ -455,7 +461,7 @@ function updateTrackMarkers(t) {
     } else {
         // ワープされていない場合：秒（Seconds）ベースで直接計算
         if (durationSec > 0) {
-            const actualEnd = (t.markerData.loopEnd && t.markerData.loopEnd < t.markerData.endMarker)
+            const actualEnd = (t.markerData.loopEnd !== undefined && t.markerData.loopEnd < t.markerData.endMarker)
                 ? t.markerData.loopEnd
                 : t.markerData.endMarker;
             startPct = Math.max(0, t.markerData.startMarker / durationSec);

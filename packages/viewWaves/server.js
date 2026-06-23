@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
+app.set('json spaces', 2); // JSON出力のプリティプリントをデフォルトで有効化
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -65,6 +66,29 @@ app.get('/audio', (req, res) => {
     res.sendFile(path.resolve(audioPath));
 });
 
+// デバッグ用：サーバーが保持しているクリップ情報をJSON返却する
+app.get('/debug/clip', (req, res) => {
+    const trackId = req.query.track !== undefined ? req.query.track : null;
+    const slotIndex = req.query.slot !== undefined ? req.query.slot : null;
+    
+    const result = {};
+    for (const key in clipLengths) {
+        if (
+            (trackId === null || key.startsWith(`${trackId}_`)) &&
+            (slotIndex === null || key.startsWith(`${trackId}_${slotIndex}`))
+        ) {
+            result[key] = clipLengths[key];
+        }
+    }
+    res.json({
+        playingSlots,
+        activeClips,
+        serverIsPlaying,
+        currentTempo,
+        clipData: result
+    });
+});
+
 const oscClient = new Client(clientHost, clientPort);
 const oscServer = new OscServer(serverPort, clientHost, () => {
     console.log(`[OSC] Listening for AbletonOSC messages on port ${serverPort}`);
@@ -92,8 +116,10 @@ setInterval(() => {
         }
     }
 
-    for (const trackId in activeClips) {
-        const slotIndex = activeClips[trackId];
+    // マーカー情報は再生状態に関係なく、現在ロードされているクリップをポーリングする
+    // activeClips は停止時にクリアされるため、playingSlots を使用する
+    for (const trackId in playingSlots) {
+        const slotIndex = playingSlots[trackId];
         if (slotIndex >= 0) {
             // UDPパケットロス対策: 必要な情報が欠落している場合は再取得
             if (clipLengths[`${trackId}_${slotIndex}_file_path`] === undefined) {
@@ -212,6 +238,8 @@ oscServer.on('message', (msg) => {
         const slotIndex = args[1];
         const length = args[2];
         clipLengths[`${trackId}_${slotIndex}`] = length;
+        // clipLengthが確定したので、clip_markersを正しい値で再送信する
+        emitMarkersIfReady(trackId, slotIndex);
     }
     else if (address === '/live/clip/get/playing_position' || address === '/live/clip/playing_position') {
         const trackId = args[0];
@@ -300,6 +328,7 @@ function emitMarkersIfReady(trackId, slotIndex, targetSocket = io) {
     const warping = clipLengths[`${trackId}_${slotIndex}_warping`];
     const looping = clipLengths[`${trackId}_${slotIndex}_looping`];
     const loopEnd = clipLengths[`${trackId}_${slotIndex}_loop_end`];
+    const clipLength = clipLengths[`${trackId}_${slotIndex}`]; // Abletonが管理するクリップ全長（beats）
     
     if (start !== undefined && end !== undefined) {
         targetSocket.emit('clip_markers', {
@@ -310,7 +339,8 @@ function emitMarkersIfReady(trackId, slotIndex, targetSocket = io) {
             isWarped: warping !== undefined ? warping : true,
             isLooping: looping || false,
             loopEnd: loopEnd || end,
-            tempo: currentTempo
+            tempo: currentTempo,
+            clipLength: clipLength  // ワープ時のtotalBeats計算に使用
         });
     }
 }
