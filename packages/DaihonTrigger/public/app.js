@@ -1397,7 +1397,10 @@ if (btnUpload && inputUpload) {
                                 const annot = pdfDocLib.context.lookup(annotRef);
                                 let isOurAnnot = false;
                                 if (annot) {
+                                    const subtype = annot.get(PDFName.of('Subtype'));
+                                    const subtypeName = subtype && typeof subtype.decodeText === 'function' ? subtype.decodeText() : '';
                                     const metaObj = annot.get(PDFName.of('DaihonTriggerData'));
+                                    
                                     if (metaObj) {
                                         isOurAnnot = true;
                                         metaCount++;
@@ -1494,6 +1497,142 @@ if (btnUpload && inputUpload) {
                                                 };
                                                 extractedPagesData[pageNum].objects.push(pathObj);
                                                 hasMetadata = true;
+                                            }
+                                        }
+                                    } else {
+                                        // --- 外部アノテーションの解析 ---
+                                        if (subtypeName === 'Ink') {
+                                            const inkList = annot.get(PDFName.of('InkList'));
+                                            if (inkList) {
+                                                const resolvedInkList = pdfDocLib.context.lookup(inkList);
+                                                if (resolvedInkList && typeof resolvedInkList.size === 'function') {
+                                                    const scaleMultiplier = 1.5; // app.js の `const scale = 1.5;` を使用
+                                                    const pageHeight = page.getHeight();
+                                                    
+                                                    // 色の取得
+                                                    let strokeColor = 'rgba(255, 0, 0, 0.7)';
+                                                    const cArray = pdfDocLib.context.lookup(annot.get(PDFName.of('C')));
+                                                    if (cArray && typeof cArray.size === 'function') {
+                                                        const r = (typeof cArray.get(0) === 'number' ? cArray.get(0) : cArray.get(0).asNumber()) * 255;
+                                                        let g = r, b = r;
+                                                        if (cArray.size() >= 3) {
+                                                            g = (typeof cArray.get(1) === 'number' ? cArray.get(1) : cArray.get(1).asNumber()) * 255;
+                                                            b = (typeof cArray.get(2) === 'number' ? cArray.get(2) : cArray.get(2).asNumber()) * 255;
+                                                        }
+                                                        strokeColor = `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, 0.7)`;
+                                                    }
+                                                    
+                                                    // 太さの取得
+                                                    let strokeWidth = 3;
+                                                    const bsDict = pdfDocLib.context.lookup(annot.get(PDFName.of('BS')));
+                                                    if (bsDict) {
+                                                        const wObj = bsDict.get(PDFName.of('W'));
+                                                        if (wObj) strokeWidth = (typeof wObj === 'number' ? wObj : wObj.asNumber()) * scaleMultiplier;
+                                                    }
+                                                    
+                                                    for (let s = 0; s < resolvedInkList.size(); s++) {
+                                                        const strokeRef = resolvedInkList.get(s);
+                                                        const strokeArray = pdfDocLib.context.lookup(strokeRef);
+                                                        if (strokeArray && typeof strokeArray.size === 'function' && strokeArray.size() >= 2) {
+                                                            const pathData = [];
+                                                            for (let p = 0; p < strokeArray.size(); p += 2) {
+                                                                const pdfXVal = strokeArray.get(p);
+                                                                const pdfYVal = strokeArray.get(p + 1);
+                                                                const pdfX = typeof pdfXVal === 'number' ? pdfXVal : pdfXVal.asNumber();
+                                                                const pdfY = typeof pdfYVal === 'number' ? pdfYVal : pdfYVal.asNumber();
+                                                                
+                                                                const fabricX = pdfX * scaleMultiplier;
+                                                                const fabricY = (pageHeight - pdfY) * scaleMultiplier;
+                                                                
+                                                                if (p === 0) {
+                                                                    pathData.push(["M", fabricX, fabricY]);
+                                                                } else {
+                                                                    pathData.push(["L", fabricX, fabricY]);
+                                                                }
+                                                            }
+                                                            
+                                                            const pathObj = {
+                                                                type: "path",
+                                                                version: "5.3.0",
+                                                                path: pathData,
+                                                                stroke: strokeColor,
+                                                                strokeWidth: strokeWidth,
+                                                                fill: null,
+                                                                strokeLineCap: "round",
+                                                                strokeLineJoin: "round",
+                                                                selectable: true,
+                                                                evented: true,
+                                                                perPixelTargetFind: false,
+                                                                padding: 10
+                                                            };
+                                                            extractedPagesData[pageNum].objects.push(pathObj);
+                                                            isOurAnnot = true; // 抽出成功
+                                                            hasMetadata = true;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if (subtypeName === 'FreeText') {
+                                            const contents = annot.get(PDFName.of('Contents'));
+                                            if (contents) {
+                                                const resolvedContents = pdfDocLib.context.lookup(contents);
+                                                let textString = '';
+                                                if (resolvedContents && typeof resolvedContents.decodeText === 'function') {
+                                                    textString = resolvedContents.decodeText();
+                                                } else if (resolvedContents && resolvedContents.asString) {
+                                                    textString = resolvedContents.asString();
+                                                } else if (resolvedContents) {
+                                                    textString = resolvedContents.value || '';
+                                                }
+                                                
+                                                const rectArray = pdfDocLib.context.lookup(annot.get(PDFName.of('Rect')));
+                                                if (textString && rectArray && typeof rectArray.size === 'function' && rectArray.size() >= 4) {
+                                                    const scaleMultiplier = 1.5;
+                                                    const pageHeight = page.getHeight();
+                                                    
+                                                    const pdfX1 = typeof rectArray.get(0) === 'number' ? rectArray.get(0) : rectArray.get(0).asNumber();
+                                                    const pdfY1 = typeof rectArray.get(1) === 'number' ? rectArray.get(1) : rectArray.get(1).asNumber();
+                                                    const pdfX2 = typeof rectArray.get(2) === 'number' ? rectArray.get(2) : rectArray.get(2).asNumber();
+                                                    const pdfY2 = typeof rectArray.get(3) === 'number' ? rectArray.get(3) : rectArray.get(3).asNumber();
+                                                    
+                                                    const pdfX = Math.min(pdfX1, pdfX2);
+                                                    const pdfW = Math.abs(pdfX2 - pdfX1);
+                                                    const pdfY = Math.max(pdfY1, pdfY2);
+                                                    
+                                                    const fabricX = pdfX * scaleMultiplier;
+                                                    const fabricY = (pageHeight - pdfY) * scaleMultiplier;
+                                                    const fabricW = pdfW * scaleMultiplier;
+                                                    
+                                                    // 色の取得
+                                                    let textColor = '#000000';
+                                                    const cArray = pdfDocLib.context.lookup(annot.get(PDFName.of('C')));
+                                                    if (cArray && typeof cArray.size === 'function') {
+                                                        const r = (typeof cArray.get(0) === 'number' ? cArray.get(0) : cArray.get(0).asNumber()) * 255;
+                                                        let g = r, b = r;
+                                                        if (cArray.size() >= 3) {
+                                                            g = (typeof cArray.get(1) === 'number' ? cArray.get(1) : cArray.get(1).asNumber()) * 255;
+                                                            b = (typeof cArray.get(2) === 'number' ? cArray.get(2) : cArray.get(2).asNumber()) * 255;
+                                                        }
+                                                        textColor = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+                                                    }
+                                                    
+                                                    const textObj = {
+                                                        type: "textbox",
+                                                        version: "5.3.0",
+                                                        left: fabricX,
+                                                        top: fabricY,
+                                                        width: fabricW,
+                                                        text: textString,
+                                                        fontSize: 24,
+                                                        fill: textColor,
+                                                        fontFamily: "\"Hiragino Kaku Gothic ProN\", \"Meiryo\", sans-serif",
+                                                        objectCaching: false,
+                                                        styles: {}
+                                                    };
+                                                    extractedPagesData[pageNum].objects.push(textObj);
+                                                    isOurAnnot = true; // 抽出成功
+                                                    hasMetadata = true;
+                                                }
                                             }
                                         }
                                     }
