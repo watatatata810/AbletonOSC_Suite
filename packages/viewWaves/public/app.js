@@ -199,6 +199,28 @@ function updatePlayheadUI(trackId, progress) {
     // WaveSurferの内部カーソルを更新
     if (t.ws) {
         t.ws.seekTo(progress);
+        
+        // OSC通信による手動でのseekTo実行時は、WaveSurfer標準のautoCenterが機能しないため
+        // ここで自前で追従モードに応じたスクロール制御を行う
+        if (autoScrollMode !== 'off') {
+            const wrapper = t.ws.getWrapper();
+            if (wrapper) {
+                const containerWidth = wrapper.clientWidth;
+                const fullWidth = wrapper.scrollWidth;
+                const cursorX = fullWidth * progress;
+
+                if (autoScrollMode === 'center') {
+                    // 中央固定: 常にプレイヘッドが中央にくるようにスクロール
+                    wrapper.scrollLeft = cursorX - (containerWidth / 2);
+                } else if (autoScrollMode === 'page') {
+                    // ページ切替: プレイヘッドが画面外に出たらページを切り替える
+                    const currentScroll = wrapper.scrollLeft;
+                    if (cursorX < currentScroll || cursorX > currentScroll + containerWidth) {
+                        wrapper.scrollLeft = cursorX;
+                    }
+                }
+            }
+        }
     }
 }
 
