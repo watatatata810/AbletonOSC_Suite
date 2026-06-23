@@ -245,9 +245,35 @@ button:active {
     flex-direction: column;
 }
 
+.footer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.next-ready-badge {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    font-weight: bold;
+    color: #4CAF50;
+    background-color: rgba(76, 175, 80, 0.15);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    opacity: 0;
+    transform: translateY(5px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+}
+
+.next-ready-badge.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
 .time-display {
     text-align: right;
-    margin-top: 6px;
     font-family: 'Courier New', Courier, monospace;
     font-size: 14px;
     font-weight: bold;

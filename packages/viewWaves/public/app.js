@@ -203,6 +203,23 @@ function updatePlayheadUI(trackId, progress) {
 }
 
 /**
+ * 次のシーンの準備完了状態（Next Readyバッジ）を更新する
+ */
+function updateNextReadyUI(trackId) {
+    const t = tracks[trackId];
+    if (!t || !t.nextReadyBadge) return;
+    
+    const inactiveKey = t.activeLayerKey === 'A' ? 'B' : 'A';
+    const isNextReady = t.layers[inactiveKey].isReady && t.layers[inactiveKey].url !== null;
+    
+    if (isNextReady) {
+        t.nextReadyBadge.classList.add('visible');
+    } else {
+        t.nextReadyBadge.classList.remove('visible');
+    }
+}
+
+/**
  * 表示中のトラックを曲時間（短い順）でソートして再配置する
  */
 function sortVisibleTracks() {
@@ -271,10 +288,20 @@ function getOrCreateTrackUI(trackId) {
     overlayRight.className = 'overlay-right';
     overlayRight.id = `overlay-right-${trackId}`;
     
+    const footerRow = document.createElement('div');
+    footerRow.className = 'footer-row';
+    
+    const nextReadyBadge = document.createElement('div');
+    nextReadyBadge.className = 'next-ready-badge';
+    nextReadyBadge.textContent = 'NEXT READY';
+    
     const timeDisplay = document.createElement('div');
     timeDisplay.className = 'time-display';
     timeDisplay.id = `time-${trackId}`;
     timeDisplay.textContent = '00:00 / -00:00';
+    
+    footerRow.appendChild(nextReadyBadge);
+    footerRow.appendChild(timeDisplay);
     
     waveContainer.appendChild(wsLayerA);
     waveContainer.appendChild(wsLayerB);
@@ -283,7 +310,7 @@ function getOrCreateTrackUI(trackId) {
     
     box.appendChild(header);
     box.appendChild(waveContainer);
-    box.appendChild(timeDisplay);
+    box.appendChild(footerRow);
     
     waveformsContainer.appendChild(box);
 
@@ -304,8 +331,8 @@ function getOrCreateTrackUI(trackId) {
 
     tracks[trackId] = {
         layers: {
-            A: { ws: wsA, el: wsLayerA, url: null },
-            B: { ws: wsB, el: wsLayerB, url: null }
+            A: { ws: wsA, el: wsLayerA, url: null, isReady: false },
+            B: { ws: wsB, el: wsLayerB, url: null, isReady: false }
         },
         activeLayerKey: 'A',
         // ゲッター/セッターを用いて既存コードからの後方互換性を保つ
@@ -317,6 +344,7 @@ function getOrCreateTrackUI(trackId) {
         titleEl: title,
         boxEl: box,
         timeEl: timeDisplay,
+        nextReadyBadge: nextReadyBadge,
         currentSceneIndex: -1,
         fileName: null,
         sceneName: null,
@@ -333,12 +361,21 @@ function getOrCreateTrackUI(trackId) {
         markerData: null
     };
 
-    const onReady = () => {
+    const onReadyA = () => {
+        tracks[trackId].layers.A.isReady = true;
         updateTrackMarkers(tracks[trackId]);
+        updateNextReadyUI(trackId);
         sortVisibleTracks();
     };
-    wsA.on('ready', onReady);
-    wsB.on('ready', onReady);
+    const onReadyB = () => {
+        tracks[trackId].layers.B.isReady = true;
+        updateTrackMarkers(tracks[trackId]);
+        updateNextReadyUI(trackId);
+        sortVisibleTracks();
+    };
+    
+    wsA.on('ready', onReadyA);
+    wsB.on('ready', onReadyB);
 
     return tracks[trackId];
 }
@@ -413,11 +450,21 @@ socket.on('clip_playing', (data) => {
         inactiveLayer.el.classList.add('active');
         
         t.activeLayerKey = inactiveKey;
+        
+        // スワップされた（元アクティブだった）レイヤーをリセットする
+        activeLayer.url = null;
+        activeLayer.isReady = false;
+        activeLayer.ws.empty();
+        
+        updateNextReadyUI(trackId);
+        
         console.log(`[Swap] Track ${trackId + 1} instantly switched to preloaded layer ${inactiveKey}`);
     } else {
         // プリロードされていなければ、従来通りアクティブなレイヤーにロードする
         console.log(`[Load] Loading audio for Track ${trackId + 1}: ${url}`);
         t.layers[t.activeLayerKey].url = url;
+        t.layers[t.activeLayerKey].isReady = false;
+        updateNextReadyUI(trackId);
         t.layers[t.activeLayerKey].ws.load(url).catch(err => {
             if (err.name !== 'AbortError') console.error('WaveSurfer load error:', err);
         });
@@ -434,8 +481,11 @@ socket.on('clip_stopped', (data) => {
         t.sceneName = null;
         t.layers['A'].url = null;
         t.layers['B'].url = null;
+        t.layers['A'].isReady = false;
+        t.layers['B'].isReady = false;
         t.layers['A'].ws.empty();
         t.layers['B'].ws.empty();
+        updateNextReadyUI(trackId);
         updateTrackTitle(trackId);
         
         // アニメーションを停止し、変数をリセット
@@ -624,6 +674,8 @@ socket.on('clip_preload', (data) => {
     
     console.log(`[Preload] Decoding audio in background layer ${inactiveKey} for Track ${trackId + 1}: ${url}`);
     inactiveLayer.url = url;
+    inactiveLayer.isReady = false;
+    updateNextReadyUI(trackId);
     inactiveLayer.ws.load(url).catch(err => {
         if (err.name !== 'AbortError') console.error('Preload WaveSurfer load error:', err);
     });
