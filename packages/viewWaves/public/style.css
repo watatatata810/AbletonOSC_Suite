@@ -253,7 +253,7 @@ button:active {
 }
 
 .next-ready-badge {
-    font-family: 'Courier New', Courier, monospace;
+    font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-size: 12px;
     font-weight: bold;
     color: #4CAF50;
