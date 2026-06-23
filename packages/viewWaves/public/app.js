@@ -270,92 +270,102 @@ function patchReRenderForZoom(ws) {
 
 // ----------------------------------------------------
 // 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
+// requestAnimationFrame でバッチ処理し、1フレームにつき1回の再描画に抑える
 // ----------------------------------------------------
 let currentZoom = 0; // 0 = 画面幅にフィット
 const MAX_ZOOM = 1000; // 最大のズーム倍率 (px/sec)
 
-waveformsContainer.addEventListener('wheel', (e) => {
-    // Ctrlキーが押されている場合（ピンチ操作もこれに該当するブラウザが多い）
-    if (e.ctrlKey) {
-        e.preventDefault(); // 画面全体の拡大縮小を防ぐ
+// rAFバッチ処理用の状態
+let pendingZoomDelta = 0;     // 累積されたdeltaY
+let zoomRAFId = null;          // requestAnimationFrame の ID
+let lastZoomMouseClientX = 0;  // 最後のマウスX座標（viewport基準）
 
-        // 現在のウィンドウ幅と、表示されている最長トラックの時間を取得
-        let maxDuration = 0;
-        const outerContainerWidth = waveformsContainer.clientWidth || window.innerWidth;
-        Object.values(tracks).forEach(t => {
-            const dur = (t.ws && t.ws.getDuration()) || 0;
-            if (dur > maxDuration) maxDuration = dur;
-        });
-        
-        // 「画面にピッタリ収まるときのピクセル/秒（px/sec）」を計算
-        const fitZoom = maxDuration > 0 ? (outerContainerWidth / maxDuration) : 10;
+/**
+ * 累積されたdeltaYをもとに、1フレーム分のズーム処理を実行する。
+ * wheel イベントが複数回発火しても render() は1回しか呼ばれない。
+ */
+function applyPendingZoom() {
+    zoomRAFId = null;
 
-        // e.deltaY: 正の値はズームアウト（ピンチイン）、負の値はズームイン（ピンチアウト）
-        const isZoomingIn = e.deltaY < 0;
-        
-        // ズーム前の実効倍率を保持（0の場合はfitZoomを使う）
-        const oldEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
+    const accumulatedDelta = pendingZoomDelta;
+    const mouseClientX = lastZoomMouseClientX;
+    pendingZoomDelta = 0; // 消費済み
 
-        // 初回ズームイン時（現在フィット表示で、拡大方向に操作された場合）
-        if (currentZoom === 0 && isZoomingIn) {
-            currentZoom = fitZoom;
+    if (accumulatedDelta === 0) return;
+
+    // 現在のウィンドウ幅と最長トラック時間
+    let maxDuration = 0;
+    const outerContainerWidth = waveformsContainer.clientWidth || window.innerWidth;
+    Object.values(tracks).forEach(t => {
+        const dur = (t.ws && t.ws.getDuration()) || 0;
+        if (dur > maxDuration) maxDuration = dur;
+    });
+    const fitZoom = maxDuration > 0 ? (outerContainerWidth / maxDuration) : 10;
+
+    const isZoomingIn = accumulatedDelta < 0;
+    const oldEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
+
+    if (currentZoom === 0 && isZoomingIn) {
+        currentZoom = fitZoom;
+    }
+
+    if (currentZoom !== 0 || isZoomingIn) {
+        const zoomFactor = 1 + (accumulatedDelta * -0.005);
+        currentZoom *= zoomFactor;
+
+        if (currentZoom <= fitZoom * 1.2) {
+            currentZoom = 0;
+        } else if (currentZoom > MAX_ZOOM) {
+            currentZoom = MAX_ZOOM;
         }
 
-        // ズーム中、またはフィット状態からのズームインの場合のみ処理
-        if (currentZoom !== 0 || isZoomingIn) {
-            // 現在の倍率に対する割合でズームさせる（指数関数的変化）ことで、滑らかさを保つ
-            const zoomFactor = 1 + (e.deltaY * -0.005);
-            currentZoom *= zoomFactor;
+        const newEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
 
-            // 制限：一番引いた状態（fitZoom）に近づいたらフィット（0）にスナップさせる
-            // 閾値を1.2倍にすることで、タッチパッドの小さなdeltaYでも確実にズーム状態を維持する
-            if (currentZoom <= fitZoom * 1.2) {
-                currentZoom = 0; 
-            } else if (currentZoom > MAX_ZOOM) {
-                currentZoom = MAX_ZOOM;
+        Object.values(tracks).forEach(t => {
+            const wsA = t.layers.A.ws;
+            const wsB = t.layers.B.ws;
+            const activeWs = t.ws;
+
+            if (activeWs && activeWs.getDuration() > 0) {
+                const duration = activeWs.getDuration();
+                const wrapper = activeWs.getWrapper();
+                const wrapperRect = wrapper.getBoundingClientRect();
+                const mouseXInWrapper = Math.max(0, mouseClientX - wrapperRect.left);
+
+                const oldFullWidth = duration * oldEffectiveZoom;
+                const oldScrollLeft = wrapper.scrollLeft;
+                const contentPosUnderMouse = oldScrollLeft + mouseXInWrapper;
+
+                if (wsA) wsA.renderer._skipScrollCorrection = true;
+                if (wsB) wsB.renderer._skipScrollCorrection = true;
+
+                if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
+                if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
+
+                if (wsA) wsA.renderer._skipScrollCorrection = false;
+                if (wsB) wsB.renderer._skipScrollCorrection = false;
+
+                const newFullWidth = duration * newEffectiveZoom;
+                const scaledPos = contentPosUnderMouse * (newFullWidth / oldFullWidth);
+                const newScrollLeft = Math.max(0, scaledPos - mouseXInWrapper);
+
+                wrapper.scrollLeft = newScrollLeft;
             }
+        });
+    }
+}
 
-            const newEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
+waveformsContainer.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+        e.preventDefault();
 
-            // 全トラックのA面・B面にズーム設定と、再計算したスクロール位置を適用
-            Object.values(tracks).forEach(t => {
-                const wsA = t.layers.A.ws;
-                const wsB = t.layers.B.ws;
-                const activeWs = t.ws;
+        // deltaYを累積し、マウス位置を記録するだけ（重い処理はしない）
+        pendingZoomDelta += e.deltaY;
+        lastZoomMouseClientX = e.clientX;
 
-                if (activeWs && activeWs.getDuration() > 0) {
-                    const duration = activeWs.getDuration();
-                    const wrapper = activeWs.getWrapper();
-                    const wrapperRect = wrapper.getBoundingClientRect();
-                    
-                    // マウスのX座標をWaveSurferラッパー基準で計算（各トラックごとに計算）
-                    const mouseXInWrapper = Math.max(0, e.clientX - wrapperRect.left);
-
-                    // ズーム前の全体幅とスクロール位置から、マウスが指している波形上の位置（ピクセル）を計算
-                    const oldFullWidth = duration * oldEffectiveZoom;
-                    const oldScrollLeft = wrapper.scrollLeft;
-                    const contentPosUnderMouse = oldScrollLeft + mouseXInWrapper;
-
-                    // reRender のスクロール補正をスキップするフラグを立てる
-                    if (wsA) wsA.renderer._skipScrollCorrection = true;
-                    if (wsB) wsB.renderer._skipScrollCorrection = true;
-
-                    // ズーム倍率を適用
-                    if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
-                    if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
-
-                    // フラグを解除
-                    if (wsA) wsA.renderer._skipScrollCorrection = false;
-                    if (wsB) wsB.renderer._skipScrollCorrection = false;
-
-                    // ズーム後の全体幅を計算し、マウス下の同じ地点が同じ画面位置に来るようにスクロール
-                    const newFullWidth = duration * newEffectiveZoom;
-                    const scaledPos = contentPosUnderMouse * (newFullWidth / oldFullWidth);
-                    const newScrollLeft = Math.max(0, scaledPos - mouseXInWrapper);
-
-                    wrapper.scrollLeft = newScrollLeft;
-                }
-            });
+        // まだこのフレームでrAFを予約していなければ予約する
+        if (!zoomRAFId) {
+            zoomRAFId = requestAnimationFrame(applyPendingZoom);
         }
     }
 }, { passive: false });
