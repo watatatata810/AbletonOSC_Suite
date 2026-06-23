@@ -306,6 +306,8 @@ waveformsContainer.addEventListener('wheel', (e) => {
                     const ratio = (oldScrollLeft + mouseX) / oldFullWidth;
 
                     // ズーム倍率を適用 (0またはfalseの場合はフィット表示)
+                    // ※ WaveSurfer V7 は内部の `reRender` 処理において、「プレイヘッド（progressWrapper）が画面上で動かないように」
+                    // 自動的に scrollLeft を補正するハードコーディングされたロジックを持っています。
                     if (wsA) wsA.zoom(currentZoom === 0 ? false : currentZoom);
                     if (wsB) wsB.zoom(currentZoom === 0 ? false : currentZoom);
 
@@ -313,8 +315,18 @@ waveformsContainer.addEventListener('wheel', (e) => {
                     const newFullWidth = currentZoom === 0 ? containerWidth : (duration * currentZoom);
                     const newScrollLeft = (ratio * newFullWidth) - mouseX;
 
-                    if (wsA) wsA.setScroll(newScrollLeft);
-                    if (wsB) wsB.setScroll(newScrollLeft);
+                    // WaveSurferによるプレイヘッド中心の強制スクロール補正を上書きするため、
+                    // DOMの更新が完了した直後に setScroll を適用する（念のため複数フレームにわたって適用）
+                    const applyScroll = () => {
+                        if (wsA) wsA.setScroll(newScrollLeft);
+                        if (wsB) wsB.setScroll(newScrollLeft);
+                    };
+
+                    requestAnimationFrame(() => {
+                        applyScroll();
+                        setTimeout(applyScroll, 0);
+                        setTimeout(applyScroll, 10);
+                    });
                 }
             });
         }
