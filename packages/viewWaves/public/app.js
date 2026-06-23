@@ -199,31 +199,6 @@ function updatePlayheadUI(trackId, progress) {
     // WaveSurferの内部カーソルを更新
     if (t.ws) {
         t.ws.seekTo(progress);
-        
-        // OSC通信による手動でのseekTo実行時は、WaveSurfer標準のautoCenterが機能しないため
-        // ここで自前で追従モードに応じたスクロール制御を行う
-        // ユーザーが手動でスクロール中の場合は一時的に追従を停止する
-        if (autoScrollMode !== 'off' && !isUserScrolling) {
-            const containerWidth = t.ws.getWrapper().clientWidth;
-            const duration = t.ws.getDuration();
-            
-            if (duration > 0) {
-                // 現在のズーム倍率(px/sec)から波形全体のピクセル幅を計算（フィット状態ならコンテナ幅と同じ）
-                const fullWidth = currentZoom > 0 ? (duration * currentZoom) : containerWidth;
-                const cursorX = fullWidth * progress;
-
-                if (autoScrollMode === 'center') {
-                    // 中央固定: 常にプレイヘッドが中央にくるようにスクロール
-                    t.ws.setScroll(cursorX - (containerWidth / 2));
-                } else if (autoScrollMode === 'page') {
-                    // ページ切替: プレイヘッドが画面外に出たらページを切り替える
-                    const currentScroll = t.ws.getScroll();
-                    if (cursorX < currentScroll || cursorX > currentScroll + containerWidth) {
-                        t.ws.setScroll(cursorX);
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -265,12 +240,9 @@ function sortVisibleTracks() {
 
 // ----------------------------------------------------
 // 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
-// および 手動スクロール時の自動追従一時停止
 // ----------------------------------------------------
 let currentZoom = 0; // 0 = 画面幅にフィット
 const MAX_ZOOM = 1000; // 最大のズーム倍率 (px/sec)
-let isUserScrolling = false;
-let scrollTimeout = null;
 
 waveformsContainer.addEventListener('wheel', (e) => {
     // Ctrlキーが押されている場合（ピンチ操作もこれに該当するブラウザが多い）
@@ -819,32 +791,7 @@ if (clockToggle && digitalClock) {
     });
 }
 
-// ==========================================
-// 波形スクロール自動追従設定
-// ==========================================
-const autoScrollModeSelect = document.getElementById('autoscroll-mode');
 
-function applyScrollModeToTracks() {
-    // 追従制御は手動（updatePlayheadUI）で行うが、
-    // 波形の手動横スクロール（overflow-x: auto）を維持するために autoScroll: true はセットする
-    Object.values(tracks).forEach(t => {
-        if (t.layers.A.ws) {
-            t.layers.A.ws.setOptions({ autoScroll: true, autoCenter: false });
-            t.layers.A.ws.renderer.scrollIntoView = () => {}; // 標準のジャンプを無効化
-        }
-        if (t.layers.B.ws) {
-            t.layers.B.ws.setOptions({ autoScroll: true, autoCenter: false });
-            t.layers.B.ws.renderer.scrollIntoView = () => {};
-        }
-    });
-}
-
-if (autoScrollModeSelect) {
-    autoScrollModeSelect.addEventListener('change', (e) => {
-        autoScrollMode = e.target.value;
-        applyScrollModeToTracks();
-    });
-}
 
 function updateClock() {
     if (!digitalClock) return;
