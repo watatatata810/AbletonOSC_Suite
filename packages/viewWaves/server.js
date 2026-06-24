@@ -53,6 +53,7 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use('/vendor/wavesurfer', express.static(path.join(__dirname, '..', '..', 'node_modules', 'wavesurfer.js', 'dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 

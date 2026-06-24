@@ -1,1 +1,26 @@
-/node_modules
+# Dependencies
+node_modules/
+packages/*/node_modules/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local runtime state
+.tmp/
+packages/*/.tmp/
+packages/*/bin/.tmp/
+
+# Serena local workspace metadata
+.serena/
+packages/*/.serena/
+
+# DaihonTrigger local project/upload data
+packages/DaihonTrigger/project_data.json
+packages/DaihonTrigger/public/assets/

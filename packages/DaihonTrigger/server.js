@@ -26,6 +26,7 @@ console.log(`[OSC] AbletonLiveからの受信用サーバーを起動しまし�
 // ====================
 
 // 静的ファイルの配信（フロントエンド用）
+app.use('/vendor/pdf-lib', express.static(path.join(__dirname, '..', '..', 'node_modules', 'pdf-lib', 'dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const multer = require('multer');
