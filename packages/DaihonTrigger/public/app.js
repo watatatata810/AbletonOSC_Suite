@@ -51,7 +51,7 @@ const saveStateForUndo = (pageNum) => {
     const canvas = fabricCanvases[pageNum];
     if (!canvas) return;
     
-    const newDataStr = JSON.stringify(canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger']));
+    const newDataStr = JSON.stringify(canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'isWrapText']));
     
     // ズーム操作等の誤タッチで同一状態が連続してスタックに積まれるのを防ぐ
     if (undoStack.length > 0) {
@@ -114,6 +114,7 @@ let clipboardObject = null;
 const contextMenu = document.getElementById('context-menu');
 const btnCtxCopy = document.getElementById('btn-ctx-copy');
 const btnCtxPaste = document.getElementById('btn-ctx-paste');
+const btnCtxWrap = document.getElementById('btn-ctx-wrap');
 const btnCtxDelete = document.getElementById('btn-ctx-delete');
 
 let contextTargetCanvasNum = null; // 現在メニューが表示されているキャンバスの番号
@@ -146,10 +147,22 @@ const showContextMenu = (x, y, showPasteOnly = false, canvasNum = null) => {
     // 表示内容の切り替え
     if (showPasteOnly) {
         btnCtxCopy.style.display = 'none';
+        if (btnCtxWrap) btnCtxWrap.style.display = 'none';
         btnCtxDelete.style.display = 'none';
         btnCtxPaste.style.display = 'block';
     } else {
         btnCtxCopy.style.display = 'block';
+        
+        const activeObj = canvasNum && fabricCanvases[canvasNum] ? fabricCanvases[canvasNum].getActiveObject() : null;
+        if (btnCtxWrap) {
+            if (activeObj && activeObj.isTrigger) {
+                btnCtxWrap.style.display = 'block';
+                btnCtxWrap.textContent = activeObj.isWrapText ? '1行で表示' : '折り返す';
+            } else {
+                btnCtxWrap.style.display = 'none';
+            }
+        }
+        
         btnCtxDelete.style.display = 'block';
         btnCtxPaste.style.display = 'none';
     }
@@ -326,7 +339,7 @@ Object.keys(modeBtns).forEach(key => {
 const saveCurrentPage = (pageNum) => {
     const canvas = fabricCanvases[pageNum];
     if (!canvas || canvas.isRestoring) return;
-    const fabricData = canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger']);
+    const fabricData = canvas.toJSON(['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'isWrapText']);
     pagesData[pageNum] = fabricData;
     socket.emit('save_data', { pdfName: currentPdfName, pageNum: pageNum, fabricData: fabricData });
 };
@@ -530,7 +543,7 @@ const updateTriggerLayout = (group) => {
     if (!group || !group.isTrigger || group.type !== 'group') return;
     
     const rect = group.getObjects()[0];
-    const text = group.getObjects()[1];
+    let text = group.getObjects()[1];
     
     if (!rect || !text) return;
     
@@ -553,40 +566,90 @@ const updateTriggerLayout = (group) => {
         scaleX: 1,
         scaleY: 1
     });
-    
-    // 元のテキストを保存しておく（切り詰め処理で元に戻すため）
-    if (typeof text.originalText === 'undefined') {
-        text.originalText = text.text;
-    }
 
     const logicalRectWidth = rect.width;
     const padding = 20; // 逆スケール不要なので固定値
     const maxTextWidth = logicalRectWidth - (padding * 2);
 
-    // 一旦元のテキストに戻して幅を計測
-    text.set('text', text.originalText);
-    
-    if (text.width > maxTextWidth) {
-        // ボタン幅を超える場合は文字を切り詰めて「…」を付与する
-        let str = text.originalText;
-        while (str.length > 0 && text.width > maxTextWidth) {
-            str = str.slice(0, -1);
-            text.set('text', str + '…');
+    // 過去のデータが fabric.Text だった場合は折り返し対応のために fabric.Textbox に変換する
+    if (text.type === 'text') {
+        const newText = new fabric.Textbox(text.text, {
+            fontSize: text.fontSize, fill: text.fill, fontWeight: text.fontWeight,
+            fontFamily: text.fontFamily,
+            originX: text.originX, originY: text.originY, textAlign: text.textAlign,
+            left: text.left, top: text.top, // ← 座標を正しく引き継ぐ！
+            objectCaching: false,
+            width: maxTextWidth,
+            splitByGrapheme: true,
+            scaleX: 1, scaleY: 1
+        });
+        if (typeof text.originalText !== 'undefined') {
+            newText.originalText = text.originalText;
         }
         
-        // 切り詰めたうえで左揃え（頭出し）にする
+        // Fabric.jsの addWithUpdate(obj) は相対座標を絶対座標として誤認識して破壊するバグがあるため、
+        // 内部の配列を直接差し替えて安全に入れ替える (Kaizen)
+        newText.group = group;
+        const index = group._objects.indexOf(text);
+        if (index !== -1) {
+            group._objects[index] = newText;
+        }
+        text = newText;
+    }
+
+    // 元のテキストを保存しておく（切り詰め処理や折り返しで元に戻すため）
+    if (typeof text.originalText === 'undefined') {
+        text.originalText = text.text;
+    }
+
+    if (group.isWrapText) {
+        // --- 折り返しモード ---
+        if (text.type === 'textbox') {
+            text.set({ width: maxTextWidth, splitByGrapheme: true });
+        }
+        // 全文表示し、枠幅で自動折り返しさせる
         text.set({
-            originX: 'left',
-            left: (-logicalRectWidth / 2) + padding,
-            textAlign: 'left'
-        });
-    } else {
-        // 収まる場合は中央揃え
-        text.set({
+            text: text.originalText,
             originX: 'center',
             left: 0,
             textAlign: 'center'
         });
+    } else {
+        // --- 切り詰めモード ---
+        // 実際のオブジェクトを書き換えて幅を測るとバグの原因になるため、安全な仮のテキストオブジェクトで幅を測定する (Kaizen: Poka-Yoke)
+        let str = text.originalText;
+        const testText = new fabric.Text(str, { fontSize: TRIGGER_FONT_SIZE, fontFamily: text.fontFamily });
+        
+        if (testText.width > maxTextWidth) {
+            // ボタン幅を超える場合は文字を切り詰めて「…」を付与する
+            while (str.length > 0 && testText.width > maxTextWidth) {
+                str = str.slice(0, -1);
+                testText.set('text', str + '…');
+            }
+            
+            if (text.type === 'textbox') {
+                text.set({ width: maxTextWidth, splitByGrapheme: false });
+            }
+            
+            // 切り詰めたうえで左揃え（頭出し）にする
+            text.set({
+                text: testText.text,
+                originX: 'left',
+                left: (-logicalRectWidth / 2) + padding,
+                textAlign: 'left'
+            });
+        } else {
+            // 収まる場合は中央揃え
+            if (text.type === 'textbox') {
+                text.set({ width: maxTextWidth, splitByGrapheme: false });
+            }
+            text.set({
+                text: str,
+                originX: 'center',
+                left: 0,
+                textAlign: 'center'
+            });
+        }
     }
     
     // 背景から文字が漏れないようにクリッピングマスクを設定（または更新）
@@ -747,7 +810,7 @@ const setupFabricEvents = (canvas, pageNum) => {
                         
                         activeDragObject = null;
                         activeDragStartCanvasNum = null;
-                    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
+                    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id', 'isWrapText']);
                     return; // cloneは非同期なのでここで抜ける
                 }
             } else {
@@ -1885,6 +1948,7 @@ if (btnExport) {
                             isSceneTrigger: obj.isSceneTrigger,
                             trackNum: obj.trackNum,
                             sceneNum: obj.sceneNum,
+                            isWrapText: obj.isWrapText,
                             labelText: labelText,
                             left: obj.left,
                             top: obj.top,
@@ -2102,6 +2166,27 @@ if (btnExport) {
 }
 
 // --- コンテキストメニューのボタンイベント ---
+if (btnCtxWrap) {
+    btnCtxWrap.addEventListener('click', () => {
+        if (!contextTargetCanvasNum) return;
+        const canvas = fabricCanvases[contextTargetCanvasNum];
+        if (!canvas) return;
+        const activeObj = canvas.getActiveObject();
+        if (!activeObj || !activeObj.isTrigger) return;
+        
+        saveStateForUndo(contextTargetCanvasNum);
+        
+        // 折り返し状態を反転
+        activeObj.isWrapText = !activeObj.isWrapText;
+        
+        // テキストのレイアウトを更新して再描画
+        updateTriggerLayout(activeObj);
+        canvas.requestRenderAll();
+        saveCurrentPage(contextTargetCanvasNum);
+        
+        hideContextMenu();
+    });
+}
 btnCtxCopy.addEventListener('click', () => {
     if (!contextTargetCanvasNum) return;
     const canvas = fabricCanvases[contextTargetCanvasNum];
@@ -2115,7 +2200,7 @@ btnCtxCopy.addEventListener('click', () => {
         hideContextMenu();
         canvas.discardActiveObject();
         canvas.requestRenderAll();
-    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
+    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id', 'isWrapText']);
 });
 
 btnCtxDelete.addEventListener('click', () => {
@@ -2163,7 +2248,7 @@ btnCtxPaste.addEventListener('click', () => {
         canvas.requestRenderAll();
         hideContextMenu();
         saveCurrentPage(contextTargetCanvasNum);
-    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id']);
+    }, ['isTrigger', 'trackNum', 'sceneNum', 'isSceneTrigger', 'id', 'isWrapText']);
 });
 
 // --- タッチ・ドラッグ・消しゴム操作の終了時の状態強制クリア（iOS等でのワープ防止） ---
