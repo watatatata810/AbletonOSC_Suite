@@ -23,6 +23,10 @@ const ABLETON_OSC_PORT = process.env.ABLETON_PORT || 11000;
 const NODE_OSC_PORT = process.env.OSC_PORT || 11001;
 const oscServer = new OscServer(NODE_OSC_PORT, '0.0.0.0');
 console.log(`[OSC] AbletonLiveからの受信用サーバーを起動しました (Port: ${NODE_OSC_PORT})`);
+
+// 同時実行数制限とタイムアウト設定 (環境変数)
+const OSC_CONCURRENCY_LIMIT = parseInt(process.env.OSC_CONCURRENCY_LIMIT, 10) || 20;
+const OSC_TIMEOUT = parseInt(process.env.OSC_TIMEOUT, 10) || 1000;
 // ====================
 
 // 静的ファイルの配信（フロントエンド用）
@@ -125,13 +129,14 @@ const queryOsc = (address, ...args) => {
         const timeout = setTimeout(() => {
             oscServer.removeListener('message', listener);
             resolve(null);
-        }, 1000); // 1000ms に延長
+        }, OSC_TIMEOUT);
 
         const listener = (msg) => {
             // msg[0] はアドレス (例: /live/song/get/num_tracks)
             if (msg[0] === address) {
-                // 他のアプリ（viewWaves等）へのレスポンスを誤検知しないように引数をチェック
-                if (args.length > 0 && msg.length > 1 && msg[1] !== args[0]) {
+                // 送信したすべての引数（args）が、レスポンスメッセージの引数（msg[1]以降）と完全一致するか確認
+                const isMatch = args.every((arg, index) => msg[1 + index] === arg);
+                if (!isMatch) {
                     return; // 無視して次を待つ
                 }
                 clearTimeout(timeout);
@@ -247,14 +252,21 @@ io.on('connection', (socket) => {
                 });
             }
 
-            // クリップ名の取得 (時間がかかる場合はタイムアウトでスキップされる)
+            // クリップ名の取得 (チャンク分割並行処理)
+            const clipTasks = [];
             for (let t = 0; t < numTracks; t++) {
                 sessionData.clips[t] = [];
                 for (let s = 0; s < numScenes; s++) {
-                    const clipNameRes = await queryOsc('/live/clip/get/name', t, s);
-                    // 返答は [track_index, scene_index, name] となるため、インデックス2を取得
-                    sessionData.clips[t][s] = clipNameRes ? clipNameRes[2] : null;
+                    clipTasks.push({ track: t, scene: s });
                 }
+            }
+
+            for (let i = 0; i < clipTasks.length; i += OSC_CONCURRENCY_LIMIT) {
+                const chunk = clipTasks.slice(i, i + OSC_CONCURRENCY_LIMIT);
+                await Promise.all(chunk.map(async (task) => {
+                    const clipNameRes = await queryOsc('/live/clip/get/name', task.track, task.scene);
+                    sessionData.clips[task.track][task.scene] = clipNameRes ? clipNameRes[2] : null;
+                }));
             }
 
             console.log(`[OSC] データ取得完了: トラック${numTracks}件, シーン${numScenes}件`);
