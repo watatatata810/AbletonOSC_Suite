@@ -1187,7 +1187,7 @@ const renderSessionGrid = (data) => {
             td.onclick = () => {
                 const warn = document.getElementById('modal-warning');
                 if (warn && !warn.classList.contains('hidden')) return;
-                placeTrigger(t.index, s.index, s.name);
+                placeTrigger(t.index, s.index, clipName || s.name);
             };
             tr.appendChild(td);
         });
