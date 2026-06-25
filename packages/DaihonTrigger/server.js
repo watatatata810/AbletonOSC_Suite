@@ -159,10 +159,17 @@ const queryOsc = (address, ...args) => {
                 oscServer.removeListener('message', listener);
                 resolve(msg.slice(1)); // 引数部分を返す
             } else if (msg[0] === '/live/error') {
-                // 空のクリップ等でエラーが返ってきた場合はタイムアウトを待たずにnullを返す
-                clearTimeout(timeout);
-                oscServer.removeListener('message', listener);
-                resolve(null);
+                const errorMsg = msg[1];
+                // エラーメッセージが文字列であり、自分が送信したaddressを含んでいるか確認
+                if (typeof errorMsg === 'string' && errorMsg.includes(address)) {
+                    // 送信したすべての引数（args）が、エラーメッセージ内に文字列として含まれているか確認
+                    const matchArgs = args.every(arg => errorMsg.includes(String(arg)));
+                    if (matchArgs) {
+                        clearTimeout(timeout);
+                        oscServer.removeListener('message', listener);
+                        resolve(null);
+                    }
+                }
             }
         };
         oscServer.on('message', listener);

@@ -276,10 +276,6 @@ const setMode = (mode) => {
     } else if (mode === MODES.TRIGGER) {
         penSettingsPanel.classList.add('pen-settings-hidden');
         if(triggerSettingsPanel) triggerSettingsPanel.classList.remove('pen-settings-hidden');
-        if (!isFetchingSessionData) {
-            isFetchingSessionData = true;
-            socket.emit('get_session_data');
-        }
     } else {
         penSettingsPanel.classList.add('pen-settings-hidden');
         if(triggerSettingsPanel) triggerSettingsPanel.classList.add('pen-settings-hidden');
