@@ -348,25 +348,9 @@ function emitMarkersIfReady(trackId, slotIndex, targetSocket = io) {
 }
 
 let connectedClients = 0;
-let shutdownTimer = null;
-
-// 接続がない状態が5秒続いたら自動終了する関数（ゾンビプロセス防止）
-function resetShutdownTimer() {
-    if (shutdownTimer) clearTimeout(shutdownTimer);
-    shutdownTimer = setTimeout(() => {
-        if (connectedClients === 0) {
-            console.log('[Server] No clients connected for 5 seconds. Auto-shutting down.');
-            process.exit(0);
-        }
-    }, 5000);
-}
-
-// 起動直後も5秒以内に接続が来なければ終了
-resetShutdownTimer();
 
 io.on('connection', (socket) => {
     connectedClients++;
-    if (shutdownTimer) clearTimeout(shutdownTimer);
     console.log(`[Web] Browser connected. Total: ${connectedClients}`);
     
     // ブラウザ接続直後に、サーバーが保持している現在の再生状態を即座に同期する
@@ -408,9 +392,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         connectedClients--;
         console.log(`[Web] Browser disconnected. Total: ${connectedClients}`);
-        if (connectedClients === 0) {
-            resetShutdownTimer();
-        }
     });
 });
 
