@@ -590,6 +590,7 @@ const updateTriggerLayout = (group) => {
         // Fabric.jsの addWithUpdate(obj) は相対座標を絶対座標として誤認識して破壊するバグがあるため、
         // 内部の配列を直接差し替えて安全に入れ替える (Kaizen)
         newText.group = group;
+        newText.canvas = group.canvas; // Canvasへの参照がないと次の再描画時に消滅してしまうため追加
         const index = group._objects.indexOf(text);
         if (index !== -1) {
             group._objects[index] = newText;
@@ -651,20 +652,11 @@ const updateTriggerLayout = (group) => {
             });
         }
     }
-    
-    // 背景から文字が漏れないようにクリッピングマスクを設定（または更新）
-    if (!group.clipPath) {
-        group.clipPath = new fabric.Rect({
-            originX: 'center',
-            originY: 'center',
-            rx: rect.rx,
-            ry: rect.ry
-        });
+    // Fabric.jsのバグ（objectCaching: false時のclipPathのコンテキスト破壊）を回避するためクリッピングを無効化
+    // ※テキストはすでに幅内に収まるよう切り詰め・自動改行されているため、クリッピングマスクは不要 (Kaizen: YAGNI)
+    if (group.clipPath) {
+        group.clipPath = null;
     }
-    group.clipPath.set({
-        width: rect.width,
-        height: rect.height
-    });
 
     // 内部のオブジェクト（RectとText）に合わせてグループの枠サイズを正確に再計算させる
     group.addWithUpdate();
@@ -1457,11 +1449,12 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
         objectCaching: false // キャッシュを使わず常にネイティブ解像度で描画
     });
     
-    const text = new fabric.Text(labelText, {
+    const text = new fabric.Textbox(labelText, {
         fontSize: TRIGGER_FONT_SIZE, fill: '#ffffff', fontWeight: 'bold',
         fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
         originX: 'center', originY: 'center', textAlign: 'center',
-        objectCaching: false
+        objectCaching: false,
+        width: 240, splitByGrapheme: true // 最初からTextboxとして作成
     });
     
     const group = new fabric.Group([rect, text], {
