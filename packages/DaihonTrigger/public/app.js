@@ -13,6 +13,18 @@ const PDF_QUALITY_MULTIPLIER = 1.7;
 // トリガーボタンの設定
 const TRIGGER_FONT_SIZE = 18;
 
+// --- Fabric.js グローバル設定（選択ハンドルのデザイン） ---
+fabric.Object.prototype.set({
+    transparentCorners: false, // ハンドルの中身を塗りつぶす
+    cornerColor: '#007aff',    // ハンドルの色（青）
+    borderColor: '#007aff',    // 枠線の色
+    cornerSize: 24,            // 視覚的なハンドルのサイズ
+    touchCornerSize: 48,       // 当たり判定をさらに大きく広げる（指での操作用）
+    padding: 10,               // 枠線とオブジェクトの隙間
+    cornerStyle: 'circle',     // 丸型のハンドル
+    borderScaleFactor: 2       // 枠線を少し太く
+});
+
 // DOM
 const zoomWrapper = document.getElementById('zoom-wrapper');
 const pageCountSpan = document.getElementById('page-count');
@@ -522,22 +534,47 @@ const updateTriggerLayout = (group) => {
     
     if (!rect || !text) return;
     
-    // 文字が伸び縮みしないように親グループのスケールを打ち消す（逆スケール）
-    const scaleX = group.scaleX || 1;
-    const scaleY = group.scaleY || 1;
+    // --- スケールの正規化（グループ自体のスケールを1にし、Rectにサイズを移譲する） ---
+    // これによりグループのバウンディングボックスが歪んだり無駄に広がるのを完全に防ぎます
+    if (group.scaleX !== 1 || group.scaleY !== 1) {
+        rect.set({
+            width: rect.width * group.scaleX,
+            height: rect.height * group.scaleY
+        });
+        group.set({
+            scaleX: 1,
+            scaleY: 1
+        });
+    }
+
+    // テキストは一切スケールさせない（フォントサイズの適用も行う）
     text.set({
-        fontSize: TRIGGER_FONT_SIZE, // 既存のボタンも含めて文字サイズを一括で縮小
-        scaleX: 1 / scaleX,
-        scaleY: 1 / scaleY
+        fontSize: TRIGGER_FONT_SIZE,
+        scaleX: 1,
+        scaleY: 1
     });
     
-    // グループ内の論理座標における文字幅とボタン幅を計算
-    const logicalTextWidth = text.width / scaleX;
+    // 元のテキストを保存しておく（切り詰め処理で元に戻すため）
+    if (typeof text.originalText === 'undefined') {
+        text.originalText = text.text;
+    }
+
     const logicalRectWidth = rect.width;
-    const padding = 20 / scaleX; // 左右のマージン
+    const padding = 20; // 逆スケール不要なので固定値
+    const maxTextWidth = logicalRectWidth - (padding * 2);
+
+    // 一旦元のテキストに戻して幅を計測
+    text.set('text', text.originalText);
     
-    if (logicalTextWidth > logicalRectWidth - (padding * 2)) {
-        // はみ出す場合は左端を揃える（頭出し）
+    if (text.width > maxTextWidth) {
+        // ボタン幅を超える場合は文字を切り詰めて「…」を付与する
+        let str = text.originalText;
+        while (str.length > 0 && text.width > maxTextWidth) {
+            str = str.slice(0, -1);
+            text.set('text', str + '…');
+        }
+        
+        // 切り詰めたうえで左揃え（頭出し）にする
         text.set({
             originX: 'left',
             left: (-logicalRectWidth / 2) + padding,
@@ -552,17 +589,22 @@ const updateTriggerLayout = (group) => {
         });
     }
     
-    // 背景から文字が漏れないようにクリッピングマスクを設定
+    // 背景から文字が漏れないようにクリッピングマスクを設定（または更新）
     if (!group.clipPath) {
         group.clipPath = new fabric.Rect({
-            width: rect.width,
-            height: rect.height,
             originX: 'center',
             originY: 'center',
             rx: rect.rx,
             ry: rect.ry
         });
     }
+    group.clipPath.set({
+        width: rect.width,
+        height: rect.height
+    });
+
+    // 内部のオブジェクト（RectとText）に合わせてグループの枠サイズを正確に再計算させる
+    group.addWithUpdate();
 };
 
 const setupFabricEvents = (canvas, pageNum) => {
