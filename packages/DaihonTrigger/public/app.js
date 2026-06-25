@@ -547,6 +547,14 @@ const updateTriggerLayout = (group) => {
     
     if (!rect || !text) return;
     
+    // --- 回転バグ回避 (Kaizen: Poka-Yoke) ---
+    // Fabric.jsでは、グループが回転(angle!=0)している状態で内部要素の座標やサイズを計算して addWithUpdate すると
+    // 座標系が狂ってレイアウトが崩壊するバグがあります。そのため、一時的にangleを0に戻して計算します。
+    const originalAngle = group.angle || 0;
+    if (originalAngle !== 0) {
+        group.set('angle', 0);
+    }
+    
     // --- スケールの正規化（グループ自体のスケールを1にし、Rectにサイズを移譲する） ---
     // これによりグループのバウンディングボックスが歪んだり無駄に広がるのを完全に防ぎます
     if (group.scaleX !== 1 || group.scaleY !== 1) {
@@ -660,6 +668,11 @@ const updateTriggerLayout = (group) => {
 
     // 内部のオブジェクト（RectとText）に合わせてグループの枠サイズを正確に再計算させる
     group.addWithUpdate();
+
+    // 一時的に0にした回転角度を元に戻す
+    if (originalAngle !== 0) {
+        group.set('angle', originalAngle);
+    }
 };
 
 const setupFabricEvents = (canvas, pageNum) => {
