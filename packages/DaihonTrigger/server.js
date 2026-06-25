@@ -14,19 +14,9 @@ const io = new Server(server);
 const DATA_FILE = path.join(__dirname, 'project_data.json');
 
 // ======= 設定 =======
-const loadConfig = () => {
-    const configPath = path.join(__dirname, '..', '..', 'config.json');
-    if (fs.existsSync(configPath)) {
-        try {
-            return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        } catch (err) {
-            console.error(`\n[Config Error] config.json の解析に失敗しました。`);
-            console.error(`記述に誤り（カンマや引用符の不足など）がないか確認してください。デフォルト値で起動します。\n`);
-        }
-    }
-    return {};
-};
-const config = loadConfig();
+const { loadConfig } = require('../shared-utils/configLoader');
+const configPath = path.join(__dirname, '..', '..', 'config.json');
+const config = loadConfig(configPath);
 
 const HTTP_PORT = config.daihonTrigger?.httpPort ?? (process.env.PORT || 3001); 
 // AbletonOSCが待ち受けるポート（Ableton Live側で設定されている受信ポート）

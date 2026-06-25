@@ -11,22 +11,15 @@ const DEFAULT_CONFIG = {
 
 let config = { ...DEFAULT_CONFIG };
 
+const { loadConfig } = require('../shared-utils/configLoader');
 const configPath = path.join(__dirname, 'config.json');
-try {
-  if (fs.existsSync(configPath)) {
-    const rawData = fs.readFileSync(configPath, 'utf8');
-    const parsed = JSON.parse(rawData);
-    config = {
-      host: parsed.host || DEFAULT_CONFIG.host,
-      listenPort: parsed.listenPort !== undefined ? Number(parsed.listenPort) : DEFAULT_CONFIG.listenPort,
-      targetPorts: Array.isArray(parsed.targetPorts) ? parsed.targetPorts.map(Number) : DEFAULT_CONFIG.targetPorts
-    };
-  } else {
-    console.log(`[OSC Router] 設定ファイル (config.json) が見つかりません。デフォルト値を使用します。`);
-  }
-} catch (err) {
-  console.warn(`[OSC Router Warning] 設定ファイルの読み込みまたはパースに失敗しました。デフォルト値を使用します。:`, err.message);
-}
+const parsed = loadConfig(configPath);
+
+config = {
+  host: parsed.host || DEFAULT_CONFIG.host,
+  listenPort: parsed.listenPort !== undefined ? Number(parsed.listenPort) : DEFAULT_CONFIG.listenPort,
+  targetPorts: Array.isArray(parsed.targetPorts) ? parsed.targetPorts.map(Number) : DEFAULT_CONFIG.targetPorts
+};
 
 const LISTEN_PORT = config.listenPort;
 const HOST = config.host;

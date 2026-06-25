@@ -10,16 +10,9 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // ======= 設定 =======
-const loadConfig = () => {
-    const configPath = path.join(__dirname, '..', '..', 'config.json');
-    if (fs.existsSync(configPath)) {
-        try {
-            return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        } catch (err) {}
-    }
-    return {};
-};
-const config = loadConfig();
+const { loadConfig } = require('../shared-utils/configLoader');
+const configPath = path.join(__dirname, '..', '..', 'config.json');
+const config = loadConfig(configPath);
 
 const HTTP_PORT = config.oscTester?.httpPort ?? 3010;
 const ABLETON_OSC_HOST = config.global?.abletonHost ?? '127.0.0.1';
