@@ -372,6 +372,11 @@ function applyPendingZoom() {
 
                 scrollContainer.scrollLeft = newScrollLeft;
                 updateOverlayUI(trackId);
+                
+                // スクロールイベントが発火しない場合（0から0への移動など）に備えて明示的にWebGLを更新
+                if (t.webglWaveform) {
+                    t.webglWaveform.setView(newEffectiveZoom, newScrollLeft);
+                }
             }
         });
     }
@@ -435,6 +440,17 @@ function getOrCreateTrackUI(trackId) {
     wsLayerB.className = 'ws-layer inactive';
     wsLayerB.id = `ws-layer-b-${trackId}`;
     
+    // WebGL表示用レイヤー
+    const webglCanvas = document.createElement('canvas');
+    webglCanvas.className = 'webgl-layer';
+    webglCanvas.id = `webgl-layer-${trackId}`;
+    webglCanvas.style.position = 'absolute';
+    webglCanvas.style.top = '0';
+    webglCanvas.style.left = '0';
+    webglCanvas.style.width = '100%';
+    webglCanvas.style.height = '100%';
+    webglCanvas.style.pointerEvents = 'none'; // クリック等を手前のWaveSurferに透過させる
+    
     // オーバーレイを追加
     const overlayLeft = document.createElement('div');
     overlayLeft.className = 'overlay-left';
@@ -461,6 +477,7 @@ function getOrCreateTrackUI(trackId) {
     
     waveContainer.appendChild(wsLayerA);
     waveContainer.appendChild(wsLayerB);
+    waveContainer.appendChild(webglCanvas);
     waveContainer.appendChild(overlayLeft);
     waveContainer.appendChild(overlayRight);
     
@@ -471,8 +488,8 @@ function getOrCreateTrackUI(trackId) {
     waveformsContainer.appendChild(box);
 
     const wsOptions = {
-        waveColor: '#ff9800',
-        progressColor: '#e68900',
+        waveColor: 'transparent',
+        progressColor: 'transparent',
         cursorColor: '#fff',
         cursorWidth: 2,
         height: 128,
@@ -484,9 +501,23 @@ function getOrCreateTrackUI(trackId) {
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
     const wsB = WaveSurfer.create({ container: `#ws-layer-b-${trackId}`, ...wsOptions });
 
-    // スクロール時にもオーバーレイを追従させる
-    wsA.on('scroll', () => updateOverlayUI(trackId));
-    wsB.on('scroll', () => updateOverlayUI(trackId));
+    const webglWaveform = new WebGLWaveform(webglCanvas, { color: [1.0, 0.596, 0.0, 1.0] });
+
+    // スクロール時にもオーバーレイとWebGL位置を追従させる
+    wsA.on('scroll', () => {
+        updateOverlayUI(trackId);
+        if (tracks[trackId].activeLayerKey === 'A') {
+            const pxPerSec = currentZoom === 0 ? (wsA.renderer.scrollContainer.clientWidth / wsA.getDuration()) : currentZoom;
+            webglWaveform.setView(pxPerSec, wsA.renderer.scrollContainer.scrollLeft);
+        }
+    });
+    wsB.on('scroll', () => {
+        updateOverlayUI(trackId);
+        if (tracks[trackId].activeLayerKey === 'B') {
+            const pxPerSec = currentZoom === 0 ? (wsB.renderer.scrollContainer.clientWidth / wsB.getDuration()) : currentZoom;
+            webglWaveform.setView(pxPerSec, wsB.renderer.scrollContainer.scrollLeft);
+        }
+    });
 
     // WaveSurfer標準のジャンプスクロールを無効化（自前で滑らかに制御するため）
     wsA.renderer.scrollIntoView = () => {};
@@ -505,6 +536,7 @@ function getOrCreateTrackUI(trackId) {
             A: { ws: wsA, el: wsLayerA, url: null, isReady: false },
             B: { ws: wsB, el: wsLayerB, url: null, isReady: false }
         },
+        webglWaveform: webglWaveform,
         activeLayerKey: 'A',
         // ゲッター/セッターを用いて既存コードからの後方互換性を保つ
         get ws() { return this.layers[this.activeLayerKey].ws; },
@@ -534,6 +566,11 @@ function getOrCreateTrackUI(trackId) {
 
     const onReadyA = () => {
         tracks[trackId].layers.A.isReady = true;
+        webglWaveform.resize();
+        if (tracks[trackId].activeLayerKey === 'A') {
+            const decoded = wsA.getDecodedData();
+            if (decoded) webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate);
+        }
         if (currentZoom !== 0) {
             tracks[trackId].layers.A.ws.zoom(currentZoom);
         }
@@ -543,6 +580,11 @@ function getOrCreateTrackUI(trackId) {
     };
     const onReadyB = () => {
         tracks[trackId].layers.B.isReady = true;
+        webglWaveform.resize();
+        if (tracks[trackId].activeLayerKey === 'B') {
+            const decoded = wsB.getDecodedData();
+            if (decoded) webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate);
+        }
         if (currentZoom !== 0) {
             tracks[trackId].layers.B.ws.zoom(currentZoom);
         }
@@ -629,8 +671,10 @@ socket.on('clip_playing', (data) => {
         t.activeLayerKey = inactiveKey;
         
         // 新しくアクティブになった WaveSurfer に現在のズーム倍率を適用
-        if (t.ws && t.ws.decodedData) {
+        if (t.ws && t.ws.getDecodedData()) {
             t.ws.zoom(currentZoom === 0 ? false : currentZoom);
+            const decoded = t.ws.getDecodedData();
+            t.webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate);
         }
         
         // スワップされた（元アクティブだった）レイヤーをリセットする
