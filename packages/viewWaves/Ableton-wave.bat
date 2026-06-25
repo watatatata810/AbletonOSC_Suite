@@ -12,5 +12,8 @@ if "%ERRORLEVEL%"=="0" (
     exit /b
 )
 
+:: Set OSC Port for viewWaves (Avoid conflict with osc-router / DaihonTrigger)
+set OSC_PORT=11002
+
 :: Start Neutralinojs (this automatically runs node server.js in background)
 start "" "bin\neutralino-win_x64.exe" --load-dir-res --path=.

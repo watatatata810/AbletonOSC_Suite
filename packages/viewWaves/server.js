@@ -12,7 +12,7 @@ const io = new Server(server);
 
 const clientHost = '127.0.0.1';
 const clientPort = process.env.ABLETON_PORT || 11000;
-const serverPort = process.env.OSC_PORT || 11001;
+const serverPort = process.env.OSC_PORT || 11002;
 
 // 現在再生中のクリップを管理（TrackID -> SlotIndex）
 const activeClips = {};

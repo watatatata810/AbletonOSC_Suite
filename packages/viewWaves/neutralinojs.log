@@ -2,3 +2,5 @@ ERROR 2026-06-22 14:30:21,910 NE_RS_UNBLDRE: Unable to load application resource
 ERROR 2026-06-23 16:40:57,311 NE_RS_UNBLDRE: Unable to load application resource file /resources/.well-known/appspecific/com.chrome.devtools.json D:\a\neutralinojs\neutralinojs\api\debug\debug.cpp:17 watat@WATA-TP
 ERROR 2026-06-23 16:55:15,797 NE_RS_UNBLDRE: Unable to load application resource file /resources/.well-known/appspecific/com.chrome.devtools.json D:\a\neutralinojs\neutralinojs\api\debug\debug.cpp:17 watat@WATA-TP
 ERROR 2026-06-23 17:05:13,238 NE_RS_UNBLDRE: Unable to load application resource file /resources/.well-known/appspecific/com.chrome.devtools.json D:\a\neutralinojs\neutralinojs\api\debug\debug.cpp:17 watat@WATA-TP
+ERROR 2026-06-25 15:37:33,402 NE_RS_UNBLDRE: Unable to load application resource file /resources/.well-known/appspecific/com.chrome.devtools.json D:\a\neutralinojs\neutralinojs\api\debug\debug.cpp:17 watat@WATA-TP
+ERROR 2026-06-25 15:37:48,826 NE_RS_UNBLDRE: Unable to load application resource file /resources/.well-known/appspecific/com.chrome.devtools.json D:\a\neutralinojs\neutralinojs\api\debug\debug.cpp:17 watat@WATA-TP
