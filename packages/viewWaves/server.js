@@ -74,10 +74,29 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/audio', (req, res) => {
     const audioPath = req.query.path;
     console.log(`[Web] Requested audio file: ${audioPath}`);
-    if (!audioPath || !fs.existsSync(audioPath)) {
+    
+    if (!audioPath) {
+        console.error(`[Web] Missing path parameter`);
+        return res.status(400).send('Path is required');
+    }
+
+    // セキュリティ対策: AbletonOSCから取得し、現在サーバーが把握しているファイルパスのリスト
+    const validPaths = Object.values(clipLengths).filter(val => typeof val === 'string');
+    
+    // Windows/Macの違いやディレクトリトラバーサル文字(..)を吸収するためにnormalize
+    const normalizedRequested = path.normalize(audioPath);
+    const isAllowed = validPaths.some(vp => path.normalize(vp) === normalizedRequested);
+
+    if (!isAllowed) {
+        console.error(`[Web] Access denied (Path Traversal attempt or invalid clip): ${audioPath}`);
+        return res.status(403).send('Forbidden: Access denied');
+    }
+
+    if (!fs.existsSync(audioPath)) {
         console.error(`[Web] Audio file not found: ${audioPath}`);
         return res.status(404).send('Audio file not found');
     }
+    
     res.sendFile(path.resolve(audioPath));
 });
 
