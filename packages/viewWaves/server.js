@@ -10,9 +10,23 @@ app.set('json spaces', 2); // JSON出力のプリティプリントをデフォ�
 const server = http.createServer(app);
 const io = new Server(server);
 
-const clientHost = '127.0.0.1';
-const clientPort = process.env.ABLETON_PORT || 11000;
-const serverPort = process.env.OSC_PORT || 11002;
+const loadConfig = () => {
+    const configPath = path.join(__dirname, '..', '..', 'config.json');
+    if (fs.existsSync(configPath)) {
+        try {
+            return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } catch (err) {
+            console.error(`\n[Config Error] config.json の解析に失敗しました。`);
+            console.error(`記述に誤り（カンマや引用符の不足など）がないか確認してください。デフォルト値で起動します。\n`);
+        }
+    }
+    return {};
+};
+const config = loadConfig();
+
+const clientHost = config.global?.abletonHost ?? '127.0.0.1';
+const clientPort = config.global?.abletonPort ?? (process.env.ABLETON_PORT || 11000);
+const serverPort = config.viewWaves?.oscPort ?? (process.env.OSC_PORT || 11002);
 
 // 現在再生中のクリップを管理（TrackID -> SlotIndex）
 const activeClips = {};
@@ -44,7 +58,7 @@ process.stderr.on('error', (err) => {
     if (err.code === 'EPIPE') process.exit(0);
 });
 
-const WEB_PORT = process.env.PORT || 3000;
+const WEB_PORT = config.viewWaves?.httpPort ?? (process.env.PORT || 3000);
 
 // CORS設定：Neutralinojsの待機画面からのアクセスを許可するため、一番最初に定義する
 app.use((req, res, next) => {
