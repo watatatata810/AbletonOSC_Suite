@@ -318,7 +318,7 @@ const setMode = (mode) => {
         }
 
         canvas.forEachObject(obj => {
-            obj.selectable = (mode === MODES.SELECT);
+            obj.selectable = (mode === MODES.SELECT || mode === MODES.TRIGGER);
             obj.evented = true;
             
             // ペンで描いた線（isTriggerがないオブジェクト）の当たり判定を拡大
@@ -663,7 +663,21 @@ const updateTriggerLayout = (group) => {
 };
 
 const setupFabricEvents = (canvas, pageNum) => {
-    
+    const updateContextMenuPosition = () => {
+        if (currentMode !== MODES.SELECT && currentMode !== MODES.TRIGGER) return;
+        const obj = canvas.getActiveObject();
+        if (!obj) return;
+        
+        const canvasRect = canvas.lowerCanvasEl.getBoundingClientRect();
+        const bound = obj.getBoundingRect();
+        
+        // ポップアップをオブジェクトの中央かつ回転ハンドルの上に配置する
+        const x = canvasRect.left + (bound.left * currentZoom) + (bound.width * currentZoom / 2);
+        const y = canvasRect.top + (bound.top * currentZoom) - 100;
+        
+        showContextMenu(x, y, false, pageNum);
+    };
+
     // パス描画完了時に保存
     canvas.on('path:created', (e) => {
         if (currentMode === MODES.DRAW) {
@@ -679,22 +693,31 @@ const setupFabricEvents = (canvas, pageNum) => {
         }
     });
 
-    canvas.on('object:scaling', (options) => {
+    const handleObjectTransforming = (options) => {
+        if (currentMode !== MODES.SELECT && currentMode !== MODES.TRIGGER) return;
+        hideContextMenu();
+        
+        // トリガーの場合はレイアウト更新
         if (options.target && options.target.isTrigger) {
             updateTriggerLayout(options.target);
         }
-    });
+    };
+
+    canvas.on('object:scaling', handleObjectTransforming);
+    canvas.on('object:resizing', handleObjectTransforming);
+    canvas.on('object:rotating', handleObjectTransforming);
 
     canvas.on('object:modified', () => {
         // 同じページ内での移動やリサイズが確定した場合のみ保存する（別ページ移動時はmouse:upで処理）
         if (!activeDragObject) {
             saveCurrentPage(pageNum);
+            updateContextMenuPosition(); // 移動やリサイズ完了時にもメニューを追従表示
         }
     });
     
     // ドラッグ移動中（ゴーストの追従）
     canvas.on('object:moving', (options) => {
-        if (currentMode !== MODES.SELECT) return;
+        if (currentMode !== MODES.SELECT && currentMode !== MODES.TRIGGER) return;
         
         hideContextMenu(); // ドラッグ開始・移動中はコンテキストメニューを非表示にする
         
@@ -814,20 +837,6 @@ const setupFabricEvents = (canvas, pageNum) => {
         }
     });
     
-    const updateContextMenuPosition = () => {
-        if (currentMode !== MODES.SELECT) return;
-        const obj = canvas.getActiveObject();
-        if (!obj) return;
-        
-        const canvasRect = canvas.lowerCanvasEl.getBoundingClientRect();
-        const bound = obj.getBoundingRect();
-        
-        const x = canvasRect.left + (bound.left * currentZoom) + (bound.width * currentZoom / 2);
-        const y = canvasRect.top + (bound.top * currentZoom);
-        
-        showContextMenu(x, y, false, pageNum);
-    };
-
     canvas.on('selection:created', updateContextMenuPosition);
     canvas.on('selection:updated', updateContextMenuPosition);
     
@@ -847,28 +856,21 @@ const setupFabricEvents = (canvas, pageNum) => {
 
         touchTargetObject = options.target;
 
+        // タップ判定変数を全モードで確実に初期化
+        pasteTouchCanceled = false;
+        let clientX = e.clientX || 0;
+        let clientY = e.clientY || 0;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+        pasteTouchStartCoords = { x: clientX, y: clientY };
+
         if (currentMode === MODES.SELECT && !options.target && !isPinching && !isMultiTouch) {
             // 他のキャンバスでメニューが出ていたら消す
             if (contextTargetCanvasNum && contextTargetCanvasNum !== pageNum) {
                 hideContextMenu();
             }
-            pasteTouchCanceled = false;
-            let clientX = e.clientX || 0;
-            let clientY = e.clientY || 0;
-            if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-            }
-            pasteTouchStartCoords = { x: clientX, y: clientY };
-        } else if (currentMode === MODES.VIEW || currentMode === MODES.TRIGGER) {
-            pasteTouchCanceled = false;
-            let clientX = e.clientX || 0;
-            let clientY = e.clientY || 0;
-            if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-            }
-            pasteTouchStartCoords = { x: clientX, y: clientY };
         }
 
         // アンドゥ用に状態保存 (トリガー配置・描画・消去の直前状態)
@@ -907,6 +909,15 @@ const setupFabricEvents = (canvas, pageNum) => {
     });
 
     canvas.on('mouse:up', (options) => {
+        // 選択中オブジェクトへのタップ（またはドラッグ終了）時のコンテキストメニュー再表示 (Kaizen)
+        if ((currentMode === MODES.SELECT || currentMode === MODES.TRIGGER) && !isPinching) {
+            const activeObj = canvas.getActiveObject();
+            if (activeObj && (touchTargetObject === activeObj || options.target === activeObj)) {
+                // 操作の微小なブレ(pasteTouchCanceled)に関わらず、マウスを離した位置にアクティブオブジェクトがあるなら必ずメニューを表示
+                updateContextMenuPosition();
+            }
+        }
+
         // ペーストメニュー表示のタップ完了判定
         if (currentMode === MODES.SELECT && pasteTouchStartCoords && !pasteTouchCanceled && !isPinching) {
             // options.target が無く、かつ動いていない場合のみ表示
