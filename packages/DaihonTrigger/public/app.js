@@ -10,6 +10,9 @@ const scale = 1.5;
 // 画質チューニング用係数 (1.0で標準, 1.5〜2.0で高画質化・メモリ消費増)
 const PDF_QUALITY_MULTIPLIER = 1.7;
 
+// トリガーボタンの設定
+const TRIGGER_FONT_SIZE = 18;
+
 // DOM
 const zoomWrapper = document.getElementById('zoom-wrapper');
 const pageCountSpan = document.getElementById('page-count');
@@ -424,6 +427,10 @@ const renderAllPages = async () => {
                         if (obj.getObjects) {
                             obj.getObjects().forEach(child => child.set('objectCaching', false));
                         }
+                        // レイアウトの再計算を適用
+                        if (typeof updateTriggerLayout === 'function') {
+                            updateTriggerLayout(obj);
+                        }
                     }
                 });
                 setMode(currentMode);
@@ -506,6 +513,58 @@ container.addEventListener('scroll', () => {
 
 // --- Fabric.js イベント ---
 let isErasing = false;
+
+const updateTriggerLayout = (group) => {
+    if (!group || !group.isTrigger || group.type !== 'group') return;
+    
+    const rect = group.getObjects()[0];
+    const text = group.getObjects()[1];
+    
+    if (!rect || !text) return;
+    
+    // 文字が伸び縮みしないように親グループのスケールを打ち消す（逆スケール）
+    const scaleX = group.scaleX || 1;
+    const scaleY = group.scaleY || 1;
+    text.set({
+        fontSize: TRIGGER_FONT_SIZE, // 既存のボタンも含めて文字サイズを一括で縮小
+        scaleX: 1 / scaleX,
+        scaleY: 1 / scaleY
+    });
+    
+    // グループ内の論理座標における文字幅とボタン幅を計算
+    const logicalTextWidth = text.width / scaleX;
+    const logicalRectWidth = rect.width;
+    const padding = 20 / scaleX; // 左右のマージン
+    
+    if (logicalTextWidth > logicalRectWidth - (padding * 2)) {
+        // はみ出す場合は左端を揃える（頭出し）
+        text.set({
+            originX: 'left',
+            left: (-logicalRectWidth / 2) + padding,
+            textAlign: 'left'
+        });
+    } else {
+        // 収まる場合は中央揃え
+        text.set({
+            originX: 'center',
+            left: 0,
+            textAlign: 'center'
+        });
+    }
+    
+    // 背景から文字が漏れないようにクリッピングマスクを設定
+    if (!group.clipPath) {
+        group.clipPath = new fabric.Rect({
+            width: rect.width,
+            height: rect.height,
+            originX: 'center',
+            originY: 'center',
+            rx: rect.rx,
+            ry: rect.ry
+        });
+    }
+};
+
 const setupFabricEvents = (canvas, pageNum) => {
     
     // パス描画完了時に保存
@@ -520,6 +579,12 @@ const setupFabricEvents = (canvas, pageNum) => {
             e.path.padding = 10;
             e.path.selectable = (currentMode === MODES.SELECT);
             saveCurrentPage(pageNum);
+        }
+    });
+
+    canvas.on('object:scaling', (options) => {
+        if (options.target && options.target.isTrigger) {
+            updateTriggerLayout(options.target);
         }
     });
 
@@ -1288,7 +1353,7 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
     });
     
     const text = new fabric.Text(labelText, {
-        fontSize: 48, fill: '#ffffff', fontWeight: 'bold', // 余白を減らすため文字をさらに大きく
+        fontSize: TRIGGER_FONT_SIZE, fill: '#ffffff', fontWeight: 'bold',
         fontFamily: '"Hiragino Kaku Gothic ProN", "Meiryo", sans-serif',
         originX: 'center', originY: 'center', textAlign: 'center',
         objectCaching: false
@@ -1306,6 +1371,7 @@ const placeTrigger = (trackIndex, sceneIndex, labelText, isScene = false) => {
         sceneNum: sceneIndex + 1
     });
     
+    updateTriggerLayout(group);
     canvas.add(group);
     saveCurrentPage(pendingTriggerPage);
     
@@ -1457,7 +1523,7 @@ if (btnUpload && inputUpload) {
                                                             left: 0,
                                                             top: 0,
                                                             text: meta.labelText,
-                                                            fontSize: 48,
+                                                            fontSize: TRIGGER_FONT_SIZE,
                                                             fill: "#ffffff",
                                                             fontWeight: "bold",
                                                             fontFamily: "\"Hiragino Kaku Gothic ProN\", \"Meiryo\", sans-serif",
