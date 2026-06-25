@@ -404,7 +404,12 @@ function startServer(port, retries) {
             console.log(`[Server] Port ${port} in use. Retrying in 500ms... (${retries} retries left)`);
             setTimeout(() => startServer(port, retries - 1), 500);
         } else {
-            console.error('Failed to start server:', err);
+            if (err.code === 'EADDRINUSE') {
+                console.error(`\n[Error] ポート ${port} はすでに使用されています。`);
+                console.error(`リトライ上限（10回）を超えたため起動を停止します。古いプロセス（ゾンビプロセス）が残っていないか確認してください。\n`);
+            } else {
+                console.error('Failed to start server:', err);
+            }
             fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] Server listen error: ${err.stack}\n`);
             
             // 多重起動時のフェイルセーフ: ポートが使用中の場合、親プロセス(Neutralino)も強制終了させる

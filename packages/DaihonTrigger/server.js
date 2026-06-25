@@ -347,6 +347,19 @@ server.listen(HTTP_PORT, '0.0.0.0', () => {
         }
     }
     console.log('=============================================\n');
+}).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`\n[Error] ポート ${HTTP_PORT} はすでに使用されています。`);
+        console.error(`古いプロセス（ゾンビプロセス）が残っているか、他のアプリケーションがこのポートを使用していないか確認してください。\n`);
+    } else {
+        console.error('[Error] サーバーの起動中にエラーが発生しました:', err);
+    }
+    try {
+        fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] Server listen error: ${err.stack}\n`);
+    } catch (e) {
+        console.error('Failed to write to crash.log:', e);
+    }
+    process.exit(1);
 });
 
 // アプリケーション終了時のクリーンアップ
