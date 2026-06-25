@@ -12,5 +12,9 @@
     "oscPort": 11003,
     "oscConcurrencyLimit": 50,
     "oscTimeout": 1000
+  },
+  "oscTester": {
+    "httpPort": 3010,
+    "oscPort": 11004
   }
 }

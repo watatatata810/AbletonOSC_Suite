@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSC Test Tool</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        h1 {
+            color: #4CAF50;
+            margin-top: 0;
+        }
+        .control-panel {
+            background-color: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .form-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: inline-block;
+            width: 100px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            background-color: #3d3d3d;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            width: 300px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #log-container {
+            flex-grow: 1;
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px dashed #333;
+            padding-bottom: 5px;
+        }
+        .log-time {
+            color: #888;
+            font-size: 0.9em;
+        }
+        .log-addr {
+            color: #0ff;
+            font-weight: bold;
+        }
+        .log-args {
+            color: #ffeb3b;
+        }
+        .btn-clear {
+            background-color: #f44336;
+        }
+        .btn-clear:hover {
+            background-color: #da190b;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>OSC Test Tool</h1>
+
+    <div class="control-panel">
+        <div class="form-group">
+            <label for="address">Address:</label>
+            <input type="text" id="address" placeholder="/live/song/get/tempo" value="/live/song/get/tempo">
+        </div>
+        <div class="form-group">
+            <label for="args">Args (comma separated):</label>
+            <input type="text" id="args" placeholder="arg1, arg2, 123, true">
+        </div>
+        <button id="btn-send">Send OSC</button>
+        <button id="btn-clear" class="btn-clear">Clear Logs</button>
+    </div>
+
+    <div id="log-container"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const addressInput = document.getElementById('address');
+        const argsInput = document.getElementById('args');
+        const btnSend = document.getElementById('btn-send');
+        const btnClear = document.getElementById('btn-clear');
+        const logContainer = document.getElementById('log-container');
+
+        // OSC送信処理
+        btnSend.addEventListener('click', () => {
+            const address = addressInput.value.trim();
+            const argsRaw = argsInput.value.trim();
+            
+            if (!address) return;
+
+            let args = [];
+            if (argsRaw) {
+                // カンマ区切りで配列にする（前後の空白は削除）
+                args = argsRaw.split(',').map(s => s.trim());
+            }
+
+            socket.emit('send_custom_osc', { address, args });
+            appendLog('OUT', address, args);
+        });
+
+        // ログクリア
+        btnClear.addEventListener('click', () => {
+            logContainer.innerHTML = '';
+        });
+
+        // OSC受信処理
+        socket.on('osc_raw_message', (msg) => {
+            // msg は配列: [ "/address", arg1, arg2, ... ]
+            if (Array.isArray(msg) && msg.length > 0) {
+                const address = msg[0];
+                const args = msg.slice(1);
+                appendLog('IN ', address, args);
+            }
+        });
+
+        function appendLog(direction, address, args) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const now = new Date();
+            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}.${now.getMilliseconds().toString().padStart(3, '0')}`;
+            
+            const argsStr = args.length > 0 ? JSON.stringify(args) : '[No Args]';
+            
+            entry.innerHTML = `
+                <span class="log-time">[${timeStr}]</span> 
+                <span style="color: ${direction === 'OUT' ? '#ff9800' : '#4caf50'};">[${direction}]</span> 
+                <span class="log-addr">${address}</span> 
+                <span class="log-args">${argsStr}</span>
+            `;
+            
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight; // 自動スクロール
+        }
+    </script>
+</body>
+</html>
