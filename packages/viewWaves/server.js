@@ -124,8 +124,11 @@ let clipLengths = {}; // { "trackId_slotIndex": length, "trackId_slotIndex_start
 let currentTempo = 120.0;
 let serverIsPlaying = false;
 
-// ポーリング処理：0.5秒に1回、現在再生中のクリップのマーカー位置を取得し直す
+// ポーリング処理：0.5秒に1回実行されるが、マーカー情報は2秒に1回に間引く
+let pollCounter = 0;
 setInterval(() => {
+    pollCounter++;
+    
     // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
     if (numTracks === 0 && connectedClients > 0) {
         oscClient.send('/live/song/get/num_tracks');
@@ -153,11 +156,14 @@ setInterval(() => {
                 oscClient.send('/live/clip/get/length', parseInt(trackId), slotIndex);
             }
 
-            oscClient.send('/live/clip/get/start_marker', parseInt(trackId), slotIndex);
-            oscClient.send('/live/clip/get/end_marker', parseInt(trackId), slotIndex);
-            oscClient.send('/live/clip/get/warping', parseInt(trackId), slotIndex);
-            oscClient.send('/live/clip/get/looping', parseInt(trackId), slotIndex);
-            oscClient.send('/live/clip/get/loop_end', parseInt(trackId), slotIndex);
+            // マーカー情報は変動が少ないため、2秒に1回 (4ループに1回) のみポーリングする
+            if (pollCounter % 4 === 0) {
+                oscClient.send('/live/clip/get/start_marker', parseInt(trackId), slotIndex);
+                oscClient.send('/live/clip/get/end_marker', parseInt(trackId), slotIndex);
+                oscClient.send('/live/clip/get/warping', parseInt(trackId), slotIndex);
+                oscClient.send('/live/clip/get/looping', parseInt(trackId), slotIndex);
+                oscClient.send('/live/clip/get/loop_end', parseInt(trackId), slotIndex);
+            }
         }
     }
 }, 500);

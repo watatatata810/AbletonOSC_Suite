@@ -199,6 +199,9 @@ oscServer.on('message', (msg) => {
     // console.log(`[OSC Received] ${msg}`); // デバッグ用のためコメントアウト
 });
 
+// データ保存用のグローバルPromiseキュー
+let saveDataPromise = Promise.resolve();
+
 // WebSocket (Socket.IO) の接続処理
 io.on('connection', (socket) => {
     console.log(`[WebSocket] クライアントが接続しました: ${socket.id}`);
@@ -337,28 +340,37 @@ io.on('connection', (socket) => {
 
     // データ保存リクエスト
     socket.on('save_data', (payload) => {
-        // payload = { pdfName: 'xxx.pdf', pageNum: 1, fabricData: { ... } }
-        let currentData = {};
-        if (fs.existsSync(DATA_FILE)) {
-            try {
-                currentData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-            } catch (e) {}
-        }
-        
-        const pdfKey = payload.pdfName || activePdfName;
-        if (!currentData[pdfKey]) {
-            currentData[pdfKey] = {};
-        }
-        
-        currentData[pdfKey][payload.pageNum] = payload.fabricData;
-        
-        fs.writeFile(DATA_FILE, JSON.stringify(currentData), (err) => {
-            if (err) console.error('[File Error] データ保存エラー:', err);
+        // Promiseチェーンに繋ぐことで、同時リクエストのファイル書き込みを直列化する（競合対策）
+        saveDataPromise = saveDataPromise.then(() => {
+            return new Promise((resolve) => {
+                let currentData = {};
+                if (fs.existsSync(DATA_FILE)) {
+                    try {
+                        currentData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+                    } catch (e) {
+                        console.error('[File Error] JSONパースエラー:', e);
+                    }
+                }
+                
+                const pdfKey = payload.pdfName || activePdfName;
+                if (!currentData[pdfKey]) {
+                    currentData[pdfKey] = {};
+                }
+                
+                currentData[pdfKey][payload.pageNum] = payload.fabricData;
+                
+                fs.writeFile(DATA_FILE, JSON.stringify(currentData), (err) => {
+                    if (err) console.error('[File Error] データ保存エラー:', err);
+                    resolve(); // 書き込み完了後に次の処理を許可
+                });
+            });
+        }).catch(err => {
+            console.error('[Queue Error] 保存キューでエラーが発生:', err);
         });
         
-        // 他のクライアントに変更をブロードキャスト
+        // UIへのブロードキャストはファイル保存を待たずに即座に行う（Optimistic UI）
         socket.broadcast.emit('page_data_updated', {
-            pdfName: pdfKey,
+            pdfName: payload.pdfName || activePdfName,
             pageNum: payload.pageNum,
             fabricData: payload.fabricData
         });
