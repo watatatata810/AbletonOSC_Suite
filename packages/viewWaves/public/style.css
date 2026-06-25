@@ -226,18 +226,18 @@ button:active {
     background-color: rgba(0, 0, 0, 0.7);
     z-index: 5;
     pointer-events: none;
-    transition: width 0.3s ease-in-out;
+    /* transformとwidthで即座に追従させるためtransitionは削除 */
 }
 
 .overlay-left {
     left: 0;
-    width: 0%;
+    width: 0px;
     border-right: 1px solid #00ff00;
 }
 
 .overlay-right {
-    right: 0;
-    width: 0%;
+    left: 0; /* rightからleftベースに変更してtransformで動かす */
+    width: 0px;
     border-left: 1px solid #00ff00;
 }
 

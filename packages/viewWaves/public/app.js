@@ -163,13 +163,35 @@ function calculateTimeDisplay(extrapolatedProgress, durationMs, startPct, endPct
 // UI更新関数群 (UI Update Functions)
 // ==========================================
 
-function updateOverlayUI(trackId, startPct, endPct) {
+function updateOverlayUI(trackId) {
+    const t = tracks[trackId];
+    if (!t) return;
     const overlayLeft = document.getElementById(`overlay-left-${trackId}`);
     const overlayRight = document.getElementById(`overlay-right-${trackId}`);
-    if (overlayLeft && overlayRight) {
-        overlayLeft.style.width = `${startPct * 100}%`;
-        overlayRight.style.width = `${(1 - endPct) * 100}%`;
+    if (!overlayLeft || !overlayRight) return;
+
+    const startPct = t.startPct || 0;
+    const endPct = t.endPct || 1;
+
+    let fullWidth = waveformsContainer.clientWidth || window.innerWidth;
+    let scrollLeft = 0;
+
+    // ズーム中かつ波形がレンダリングされている場合は、実際のスクロール領域の幅を取得
+    if (t.ws && t.ws.renderer && t.ws.renderer.scrollContainer) {
+        fullWidth = currentZoom === 0 ? t.ws.renderer.scrollContainer.clientWidth : t.ws.renderer.scrollContainer.scrollWidth;
+        scrollLeft = t.ws.renderer.scrollContainer.scrollLeft;
     }
+
+    // 左側のグレーアウト
+    const leftWidth = startPct * fullWidth;
+    overlayLeft.style.width = `${leftWidth}px`;
+    overlayLeft.style.transform = `translateX(${-scrollLeft}px)`;
+
+    // 右側のグレーアウト
+    const rightWidth = (1 - endPct) * fullWidth;
+    overlayRight.style.width = `${rightWidth}px`;
+    const rightPos = endPct * fullWidth - scrollLeft;
+    overlayRight.style.transform = `translateX(${rightPos}px)`;
 }
 
 function updateTimerUI(trackId, timeData) {
@@ -322,7 +344,8 @@ function applyPendingZoom() {
 
         const newEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
 
-        Object.values(tracks).forEach((t, trackIndex) => {
+        Object.keys(tracks).forEach(trackId => {
+            const t = tracks[trackId];
             const wsA = t.layers.A.ws;
             const wsB = t.layers.B.ws;
             const activeWs = t.ws;
@@ -348,6 +371,7 @@ function applyPendingZoom() {
                 const newScrollLeft = Math.max(0, scaledPos - mouseXInContainer);
 
                 scrollContainer.scrollLeft = newScrollLeft;
+                updateOverlayUI(trackId);
             }
         });
     }
@@ -459,6 +483,10 @@ function getOrCreateTrackUI(trackId) {
 
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
     const wsB = WaveSurfer.create({ container: `#ws-layer-b-${trackId}`, ...wsOptions });
+
+    // スクロール時にもオーバーレイを追従させる
+    wsA.on('scroll', () => updateOverlayUI(trackId));
+    wsB.on('scroll', () => updateOverlayUI(trackId));
 
     // WaveSurfer標準のジャンプスクロールを無効化（自前で滑らかに制御するため）
     wsA.renderer.scrollIntoView = () => {};
@@ -859,7 +887,7 @@ function updateTrackMarkers(t) {
     
     // UIを更新
     const trackId = Object.keys(tracks).find(key => tracks[key] === t);
-    updateOverlayUI(trackId, startPct, endPct);
+    updateOverlayUI(trackId);
 }
 
 // ==========================================
