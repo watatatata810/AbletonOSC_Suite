@@ -8,8 +8,8 @@
     "oscPort": 11002
   },
   "daihonTrigger": {
-    "httpPort": 3001,
-    "oscPort": 11001,
+    "httpPort": 3009,
+    "oscPort": 11003,
     "oscConcurrencyLimit": 20,
     "oscTimeout": 1000
   }
