@@ -141,29 +141,45 @@ console.log(`[OSC] Ableton LiveへのOSC送信用クライアントを準備し�
  */
 const queryOsc = (address, ...args) => {
     return new Promise((resolve) => {
+        // argsの最後にオプションオブジェクトがあれば取り出す
+        let customTimeout = OSC_TIMEOUT;
+        let actualArgs = args;
+        let matchArgs = true; // デフォルトは引数マッチを有効にする
+
+        if (args.length > 0 && typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null && args[args.length - 1].timeout !== undefined) {
+            customTimeout = args[args.length - 1].timeout;
+            matchArgs = args[args.length - 1].matchArgs !== false;
+            actualArgs = args.slice(0, -1);
+        } else if (args.length > 0 && typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null && args[args.length - 1].matchArgs !== undefined) {
+            matchArgs = args[args.length - 1].matchArgs;
+            actualArgs = args.slice(0, -1);
+        }
+
         // 空のクリップなどを取得した際にLiveから返答がない場合があるため、タイムアウトを設定
         const timeout = setTimeout(() => {
             oscServer.removeListener('message', listener);
             resolve(null);
-        }, OSC_TIMEOUT);
+        }, customTimeout);
 
         const listener = (msg) => {
             // msg[0] はアドレス (例: /live/song/get/num_tracks)
             if (msg[0] === address) {
-                // 送信したすべての引数（args）が、レスポンスメッセージの引数（msg[1]以降）と完全一致するか確認
-                const isMatch = args.every((arg, index) => msg[1 + index] === arg);
-                if (!isMatch) {
-                    return; // 無視して次を待つ
+                if (matchArgs) {
+                    // 送信したすべての引数（actualArgs）が、レスポンスメッセージの引数（msg[1]以降）と完全一致するか確認
+                    const isMatch = actualArgs.every((arg, index) => msg[1 + index] === arg);
+                    if (!isMatch) {
+                        return; // 無視して次を待つ
+                    }
                 }
                 clearTimeout(timeout);
                 oscServer.removeListener('message', listener);
                 resolve(msg.slice(1)); // 引数部分を返す
             } else if (msg[0] === '/live/error') {
                 const errorMsg = msg[1];
-                // エラーメッセージが文字列であり、自分が送信したaddressを含んでいるか確認
+                console.log(`[Debug OSC Error] Requested: ${address} (args: ${JSON.stringify(actualArgs)}) | Received: ${errorMsg}`);
+                // エラーメッセージが文字列であり、自分が送信したaddressを含んでいるか極めて厳格に確認
                 if (typeof errorMsg === 'string' && errorMsg.includes(address)) {
-                    // 送信したすべての引数（args）が、エラーメッセージ内に文字列として含まれているか確認
-                    const matchArgs = args.every(arg => errorMsg.includes(String(arg)));
+                    const matchArgs = actualArgs.every(arg => errorMsg.includes(String(arg)));
                     if (matchArgs) {
                         clearTimeout(timeout);
                         oscServer.removeListener('message', listener);
@@ -174,7 +190,7 @@ const queryOsc = (address, ...args) => {
         };
         oscServer.on('message', listener);
 
-        oscClient.send(address, ...args, (err) => {
+        oscClient.send(address, ...actualArgs, (err) => {
             if (err) {
                 clearTimeout(timeout);
                 oscServer.removeListener('message', listener);
@@ -246,7 +262,7 @@ io.on('connection', (socket) => {
             
             const numTracks = tracksRes ? tracksRes[0] : 0;
             const numScenes = scenesRes ? scenesRes[0] : 0;
-            
+
             const sessionData = {
                 numTracks,
                 numScenes,
@@ -255,41 +271,50 @@ io.on('connection', (socket) => {
                 clips: [] // clips[trackIndex][sceneIndex] の2次元配列
             };
 
-            // トラック名の取得
-            for (let t = 0; t < numTracks; t++) {
-                const nameRes = await queryOsc('/live/track/get/name', t);
-                // 返答は [track_index, name] となるため、インデックス1を取得
-                sessionData.tracks.push({
-                    index: t,
-                    name: nameRes ? nameRes[1] : `Track ${t + 1}`
-                });
+            // バルククエリ(track_data)を用いてトラック名と全クリップ名を一括取得する
+            // レスポンスには引数が含まれないため matchArgs: false を指定。
+            // トラック数が多い場合を考慮し、タイムアウトは OSC_TIMEOUT ではなく長め(5000ms等)に設定。
+            const trackDataRes = await queryOsc('/live/song/get/track_data', 0, numTracks, 'track.name', 'clip.name', { timeout: 5000, matchArgs: false });
+            
+            if (trackDataRes && trackDataRes.length > 0) {
+                // trackDataRes はフラットな配列として返ってくる
+                // [ track0_name, clip0_0, clip0_1, ..., track1_name, clip1_0, ... ]
+                let offset = 0;
+                for (let t = 0; t < numTracks; t++) {
+                    const trackName = trackDataRes[offset];
+                    sessionData.tracks.push({
+                        index: t,
+                        name: trackName || `Track ${t + 1}`
+                    });
+                    offset++;
+                    
+                    const trackClips = [];
+                    for (let s = 0; s < numScenes; s++) {
+                        trackClips.push(trackDataRes[offset] || null);
+                        offset++;
+                    }
+                    sessionData.clips.push(trackClips);
+                }
+            } else {
+                // 万が一 track_data の一括取得に失敗した場合のフォールバック
+                console.warn('[OSC Warning] track_data の取得に失敗したかタイムアウトしました。');
+                for (let t = 0; t < numTracks; t++) {
+                    sessionData.tracks.push({ index: t, name: `Track ${t + 1}` });
+                    const trackClips = [];
+                    for (let s = 0; s < numScenes; s++) {
+                        trackClips.push(null);
+                    }
+                    sessionData.clips.push(trackClips);
+                }
             }
 
-            // シーン名の取得
+            // シーン名は track_data から取得できないため個別に取得
             for (let s = 0; s < numScenes; s++) {
                 const nameRes = await queryOsc('/live/scene/get/name', s);
-                // 返答は [scene_index, name] となるため、インデックス1を取得
                 sessionData.scenes.push({
                     index: s,
                     name: nameRes ? nameRes[1] : `Scene ${s + 1}`
                 });
-            }
-
-            // クリップ名の取得 (チャンク分割並行処理)
-            const clipTasks = [];
-            for (let t = 0; t < numTracks; t++) {
-                sessionData.clips[t] = [];
-                for (let s = 0; s < numScenes; s++) {
-                    clipTasks.push({ track: t, scene: s });
-                }
-            }
-
-            for (let i = 0; i < clipTasks.length; i += OSC_CONCURRENCY_LIMIT) {
-                const chunk = clipTasks.slice(i, i + OSC_CONCURRENCY_LIMIT);
-                await Promise.all(chunk.map(async (task) => {
-                    const clipNameRes = await queryOsc('/live/clip/get/name', task.track, task.scene);
-                    sessionData.clips[task.track][task.scene] = clipNameRes ? clipNameRes[2] : null;
-                }));
             }
 
             console.log(`[OSC] データ取得完了: トラック${numTracks}件, シーン${numScenes}件`);
