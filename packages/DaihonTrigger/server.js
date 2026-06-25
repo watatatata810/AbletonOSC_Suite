@@ -72,6 +72,10 @@ const storage = multer.diskStorage({
         } catch(e) {
             console.error('[Upload] ファイル名のデコードに失敗しました:', e);
         }
+        
+        // セキュリティ対策: パストラバーサル攻撃を防ぐため、ディレクトリパスを削除し純粋なファイル名のみを抽出する
+        originalName = path.basename(originalName);
+        
         activePdfName = originalName;
         cb(null, originalName);
     }
