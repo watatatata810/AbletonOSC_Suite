@@ -9,12 +9,14 @@ class WebGLWaveform {
         }
 
         this.color = options.color || [1.0, 0.5, 0.0, 1.0]; // Default orange-ish color
-        this.length = 0;
+        this.lods = { A: null, B: null };
+        this.lengths = { A: 0, B: 0 };
+        this.sampleRates = { A: 44100, B: 44100 };
+        this.activeLayerKey = 'A';
         this.zoom = 1.0;     // Pixels per sample
         this.offset = 0.0;   // Scroll offset in pixels
 
         this._initShaders();
-        this._initBuffers();
         
         // Handle resizing
         this.resize();
@@ -92,12 +94,6 @@ class WebGLWaveform {
         return shader;
     }
 
-    _initBuffers() {
-        const gl = this.gl;
-        this.amplitudeBuffer = gl.createBuffer();
-        this.indexBuffer = gl.createBuffer();
-    }
-
     resize() {
         // Resize canvas to match display size exactly to avoid blurring
         const rect = this.canvas.parentElement.getBoundingClientRect();
@@ -145,13 +141,23 @@ class WebGLWaveform {
     /**
      * @param {Float32Array} float32Array Raw audio channel data
      * @param {number} sampleRate Audio sample rate (e.g. 44100)
+     * @param {string} layerKey Target layer ('A' or 'B')
      */
-    updateData(float32Array, sampleRate = 44100) {
+    updateData(float32Array, sampleRate = 44100, layerKey = 'A') {
         const gl = this.gl;
-        this.length = float32Array.length;
-        this.sampleRate = sampleRate;
+        
+        // Release old buffers if they exist for this layer to prevent memory leaks
+        if (this.lods[layerKey]) {
+            this.lods[layerKey].forEach(lod => {
+                if (lod.ampBuf) gl.deleteBuffer(lod.ampBuf);
+                if (lod.idxBuf) gl.deleteBuffer(lod.idxBuf);
+            });
+        }
 
-        this.lods = [];
+        this.lengths[layerKey] = float32Array.length;
+        this.sampleRates[layerKey] = sampleRate;
+
+        const layerLods = [];
 
         // LOD 0: Original Data (for deep zoom)
         const ampBuf0 = gl.createBuffer();
@@ -164,14 +170,19 @@ class WebGLWaveform {
         gl.bindBuffer(gl.ARRAY_BUFFER, idxBuf0);
         gl.bufferData(gl.ARRAY_BUFFER, indices0, gl.STATIC_DRAW);
         
-        this.lods.push({ ampBuf: ampBuf0, idxBuf: idxBuf0, length: float32Array.length });
+        layerLods.push({ ampBuf: ampBuf0, idxBuf: idxBuf0, length: float32Array.length });
         
         // Generate LODs (Min/Max decimation for wide views)
-        this.lods.push(this._createLOD(float32Array, 10));   // LOD 1: 10x
-        this.lods.push(this._createLOD(float32Array, 100));  // LOD 2: 100x
-        this.lods.push(this._createLOD(float32Array, 1000)); // LOD 3: 1000x
+        layerLods.push(this._createLOD(float32Array, 10));   // LOD 1: 10x
+        layerLods.push(this._createLOD(float32Array, 100));  // LOD 2: 100x
+        layerLods.push(this._createLOD(float32Array, 1000)); // LOD 3: 1000x
 
-        this.render();
+        this.lods[layerKey] = layerLods;
+
+        // Only trigger render if this is the active layer
+        if (layerKey === this.activeLayerKey) {
+            this.render();
+        }
     }
 
     /**
@@ -180,31 +191,63 @@ class WebGLWaveform {
      * @param {number} scrollLeft The current horizontal scroll position in pixels
      */
     setView(pxPerSec, scrollLeft) {
-        if (!this.sampleRate) return;
+        const sampleRate = this.sampleRates[this.activeLayerKey] || 44100;
         
         // Convert pxPerSec to pxPerSample
-        this.zoom = pxPerSec / this.sampleRate;
+        this.zoom = pxPerSec / sampleRate;
         this.offset = scrollLeft;
         
         this.render();
     }
 
+    /**
+     * Switch active rendering layer
+     * @param {string} layerKey Active layer ('A' or 'B')
+     */
+    setActiveLayer(layerKey) {
+        if (layerKey !== 'A' && layerKey !== 'B') return;
+        this.activeLayerKey = layerKey;
+        this.render();
+    }
+
+    /**
+     * Clear all buffers and lengths
+     */
+    clear() {
+        const gl = this.gl;
+        ['A', 'B'].forEach(layerKey => {
+            if (this.lods[layerKey]) {
+                this.lods[layerKey].forEach(lod => {
+                    if (lod.ampBuf) gl.deleteBuffer(lod.ampBuf);
+                    if (lod.idxBuf) gl.deleteBuffer(lod.idxBuf);
+                });
+            }
+            this.lods[layerKey] = null;
+            this.lengths[layerKey] = 0;
+        });
+        this.render();
+    }
+
     render() {
         const gl = this.gl;
-        if (this.length === 0 || !this.lods) return;
-
-        // Clear canvas
+        
+        // Clear canvas (always clear even if no data to draw)
         gl.clearColor(0.0, 0.0, 0.0, 0.0); // Transparent background
         gl.clear(gl.COLOR_BUFFER_BIT);
+
+        const activeLods = this.lods[this.activeLayerKey];
+        const length = this.lengths[this.activeLayerKey] || 0;
+        
+        if (length === 0 || !activeLods) return;
 
         gl.useProgram(this.program);
 
         // Select LOD based on zoom level to prevent GPU overdraw bottleneck
         const samplesPerPixel = 1.0 / this.zoom;
-        let activeLod = this.lods[0];
-        if (samplesPerPixel > 1000) activeLod = this.lods[3];
-        else if (samplesPerPixel > 100) activeLod = this.lods[2];
-        else if (samplesPerPixel > 50) activeLod = this.lods[1];
+        let activeLod = activeLods[0];
+        if (samplesPerPixel > 1000) activeLod = activeLods[3];
+        else if (samplesPerPixel > 100) activeLod = activeLods[2];
+        else if (samplesPerPixel > 50) activeLod = activeLods[1];
 
         // Bind Amplitude Buffer
         gl.bindBuffer(gl.ARRAY_BUFFER, activeLod.ampBuf);

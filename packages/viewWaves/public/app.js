@@ -567,13 +567,24 @@ function getOrCreateTrackUI(trackId) {
     const onReadyA = () => {
         tracks[trackId].layers.A.isReady = true;
         webglWaveform.resize();
-        if (tracks[trackId].activeLayerKey === 'A') {
-            const decoded = wsA.getDecodedData();
-            if (decoded) webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate);
+        
+        // Active/Inactiveに関わらず、デコード完了時に即座にWebGLバッファを構築（プリレンダリング）
+        const decoded = wsA.getDecodedData();
+        if (decoded) {
+            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'A');
         }
+        
         if (currentZoom !== 0) {
             tracks[trackId].layers.A.ws.zoom(currentZoom);
         }
+        
+        // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
+        if (tracks[trackId].activeLayerKey === 'A') {
+            const scrollContainer = wsA.renderer.scrollContainer;
+            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / wsA.getDuration()) : currentZoom;
+            webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
+        }
+        
         updateTrackMarkers(tracks[trackId]);
         updateNextReadyUI(trackId);
         sortVisibleTracks();
@@ -581,13 +592,24 @@ function getOrCreateTrackUI(trackId) {
     const onReadyB = () => {
         tracks[trackId].layers.B.isReady = true;
         webglWaveform.resize();
-        if (tracks[trackId].activeLayerKey === 'B') {
-            const decoded = wsB.getDecodedData();
-            if (decoded) webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate);
+        
+        // 同様にB面もデコード完了時に即座に構築
+        const decoded = wsB.getDecodedData();
+        if (decoded) {
+            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'B');
         }
+        
         if (currentZoom !== 0) {
             tracks[trackId].layers.B.ws.zoom(currentZoom);
         }
+        
+        // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
+        if (tracks[trackId].activeLayerKey === 'B') {
+            const scrollContainer = wsB.renderer.scrollContainer;
+            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / wsB.getDuration()) : currentZoom;
+            webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
+        }
+        
         updateTrackMarkers(tracks[trackId]);
         updateNextReadyUI(trackId);
         sortVisibleTracks();
@@ -673,8 +695,13 @@ socket.on('clip_playing', (data) => {
         // 新しくアクティブになった WaveSurfer に現在のズーム倍率を適用
         if (t.ws && t.ws.getDecodedData()) {
             t.ws.zoom(currentZoom === 0 ? false : currentZoom);
-            const decoded = t.ws.getDecodedData();
-            t.webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate);
+            // WebGL側は事前に転送（プリレンダリング）が完了しているため、アクティブレイヤーをスワップするだけで完了
+            t.webglWaveform.setActiveLayer(inactiveKey);
+            
+            // スワップ直後に最新のズームとスクロール位置をWebGLに同期する
+            const scrollContainer = t.ws.renderer.scrollContainer;
+            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / t.ws.getDuration()) : currentZoom;
+            t.webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
         }
         
         // スワップされた（元アクティブだった）レイヤーをリセットする
@@ -690,6 +717,10 @@ socket.on('clip_playing', (data) => {
         console.log(`[Load] Loading audio for Track ${trackId + 1}: ${url}`);
         t.layers[t.activeLayerKey].url = url;
         t.layers[t.activeLayerKey].isReady = false;
+        
+        // 新規ロード時には、現在のアクティブレイヤーを描画対象として設定しておく
+        t.webglWaveform.setActiveLayer(t.activeLayerKey);
+        
         updateNextReadyUI(trackId);
         t.layers[t.activeLayerKey].ws.load(url).catch(err => {
             if (err.name !== 'AbortError') console.error('WaveSurfer load error:', err);
@@ -711,6 +742,10 @@ socket.on('clip_stopped', (data) => {
         t.layers['B'].isReady = false;
         t.layers['A'].ws.empty();
         t.layers['B'].ws.empty();
+        
+        // WebGLバッファメモリを解放して描画をクリア
+        t.webglWaveform.clear();
+        
         updateNextReadyUI(trackId);
         updateTrackTitle(trackId);
         
