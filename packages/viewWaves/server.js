@@ -134,7 +134,7 @@ setInterval(() => {
     pollCounter++;
     
     // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
-    if (numTracks === 0 && connectedClients > 0) {
+    if (numTracks === 0) {
         oscClient.send('/live/song/get/num_tracks');
     }
     
