@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "qrcode": "^1.5.3",
     "tree-kill": "^1.2.2"
   }
 }

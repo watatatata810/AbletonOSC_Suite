@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
 const kill = require('tree-kill');
+const QRCode = require('qrcode');
 
 const PORT = 3020;
 const runningProcesses = {}; // { packageName: { process, pid, status } }
@@ -141,6 +142,25 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/qrcode')) {
+    const urlParams = new URL(req.url, `http://${req.headers.host}`);
+    const targetUrl = urlParams.searchParams.get('url');
+    if (!targetUrl) {
+      res.writeHead(400);
+      res.end('Missing url parameter');
+      return;
+    }
+    try {
+      const qrDataUrl = await QRCode.toDataURL(targetUrl);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, qr: qrDataUrl }));
+    } catch (err) {
+      res.writeHead(500);
+      res.end(err.message);
+    }
     return;
   }
 

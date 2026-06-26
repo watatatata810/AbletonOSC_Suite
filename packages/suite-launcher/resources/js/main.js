@@ -103,7 +103,7 @@ async function handleToggle(e) {
 }
 
 // QRコードの表示
-function showQrCode(e) {
+async function showQrCode(e) {
     const ip = e.target.getAttribute('data-ip');
     const port = e.target.getAttribute('data-port');
     const name = e.target.getAttribute('data-name');
@@ -111,17 +111,22 @@ function showQrCode(e) {
 
     document.getElementById('qr-url-text').textContent = `${name}: ${url}`;
     const container = document.getElementById('qr-code-img-container');
-    container.innerHTML = '';
+    container.innerHTML = '生成中...';
+    document.getElementById('qr-modal').style.display = 'flex';
 
-    QRCode.toCanvas(url, { width: 200 }, function (error, canvas) {
-        if (error) {
-            logToConsole(`QRコード生成エラー: ${error}`);
-            return;
-          }
-          container.appendChild(canvas);
-          document.getElementById('qr-modal').style.display = 'flex';
-      });
-  }
+    try {
+        const res = await fetch(`${API_BASE}/qrcode?url=${encodeURIComponent(url)}`);
+        const result = await res.json();
+        if (result.success) {
+            container.innerHTML = `<img src="${result.qr}" width="200" height="200" alt="QR Code">`;
+        } else {
+            container.innerHTML = 'QRコードの生成に失敗しました。';
+        }
+    } catch (err) {
+        container.innerHTML = '通信エラーが発生しました。';
+        logToConsole(`QRコード生成エラー: ${err.message}`);
+    }
+}
 
   // 全起動・全停止処理
   async function handleAll(action) {
