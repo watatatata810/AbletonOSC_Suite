@@ -35,7 +35,7 @@
       "center": true,
       "alwaysOnTop": false,
       "icon": "/resources/favicon.ico",
-      "enableInspector": true,
+      "enableInspector": false,
       "exitProcessOnClose": true
     }
   },
