@@ -72,12 +72,11 @@ function startPackage(pkgName) {
       binary = 'neutralino-linux_x64';
     }
     const binaryPath = path.join(pkgDir, 'bin', binary);
+    // 診断ログ収集および環境変数の明示的伝達のため、標準入出力をパイプし、環境変数を引き渡す
     child = spawn(binaryPath, ['--load-dir-res', '--path=.'], {
       cwd: pkgDir,
-      detached: true,
-      stdio: 'ignore'
+      env: { ...process.env, OSC_PORT: '11002', PORT: '3000' }
     });
-    child.unref();
   } else {
     const nodePath = process.execPath; // 現在実行中の node バイナリのパス
     const scriptPath = path.join(pkgDir, pkg.startCmd);
