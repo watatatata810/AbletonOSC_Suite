@@ -179,7 +179,7 @@ function updateOverlayUI(trackId) {
 
     // ズーム中かつ波形がレンダリングされている場合は、実際のスクロール領域の幅を取得
     if (t.ws && t.ws.renderer && t.ws.renderer.scrollContainer) {
-        fullWidth = currentZoom === 0 ? t.ws.renderer.scrollContainer.clientWidth : t.ws.renderer.scrollContainer.scrollWidth;
+        fullWidth = t.currentZoom === 0 ? t.ws.renderer.scrollContainer.clientWidth : t.ws.renderer.scrollContainer.scrollWidth;
         scrollLeft = t.ws.renderer.scrollContainer.scrollLeft;
     }
 
@@ -314,108 +314,80 @@ function patchReRenderForZoom(ws) {
 // 波形のズーム機能 (Ctrl + ホイール / ピンチ操作)
 // requestAnimationFrame でバッチ処理し、1フレームにつき1回の再描画に抑える
 // ----------------------------------------------------
-let currentZoom = 0; // 0 = 画面幅にフィット
 const MAX_ZOOM = 1000; // 最大のズーム倍率 (px/sec)
-
-// rAFバッチ処理用の状態
-let pendingZoomDelta = 0;     // 累積されたdeltaY
-let zoomRAFId = null;          // requestAnimationFrame の ID
-let lastZoomMouseClientX = 0;  // 最後のマウスX座標（viewport基準）
 
 /**
  * 累積されたdeltaYをもとに、1フレーム分のズーム処理を実行する。
  * wheel イベントが複数回発火しても render() は1回しか呼ばれない。
  */
-function applyPendingZoom() {
-    zoomRAFId = null;
+/**
+ * 累積されたdeltaYをもとに、1フレーム分のズーム処理を実行する。
+ * wheel イベントが複数回発火しても render() は1回しか呼ばれない。
+ */
+function applyPendingZoom(trackId) {
+    const t = tracks[trackId];
+    if (!t) return;
+    t.zoomRAFId = null;
 
-    const accumulatedDelta = pendingZoomDelta;
-    const mouseClientX = lastZoomMouseClientX;
-    pendingZoomDelta = 0; // 消費済み
+    const accumulatedDelta = t.pendingZoomDelta;
+    const mouseClientX = t.lastZoomMouseClientX;
+    t.pendingZoomDelta = 0; // 消費済み
 
     if (accumulatedDelta === 0) return;
 
-    // 現在のウィンドウ幅と最長トラック時間
-    let maxDuration = 0;
+    // 現在のウィンドウ幅とトラック時間
     const outerContainerWidth = waveformsContainer.clientWidth || window.innerWidth;
-    Object.values(tracks).forEach(t => {
-        const dur = (t.ws && t.ws.getDuration()) || 0;
-        if (dur > maxDuration) maxDuration = dur;
-    });
-    const fitZoom = maxDuration > 0 ? (outerContainerWidth / maxDuration) : 10;
+    const duration = (t.ws && t.ws.getDuration()) || 0;
+    const fitZoom = duration > 0 ? (outerContainerWidth / duration) : 10;
 
     const isZoomingIn = accumulatedDelta < 0;
-    const oldEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
+    const oldEffectiveZoom = t.currentZoom === 0 ? fitZoom : t.currentZoom;
 
-    if (currentZoom === 0 && isZoomingIn) {
-        currentZoom = fitZoom;
+    if (t.currentZoom === 0 && isZoomingIn) {
+        t.currentZoom = fitZoom;
     }
 
-    if (currentZoom !== 0 || isZoomingIn) {
+    if (t.currentZoom !== 0 || isZoomingIn) {
         const zoomFactor = 1 + (accumulatedDelta * -0.005);
-        currentZoom *= zoomFactor;
+        t.currentZoom *= zoomFactor;
 
         // fitZoom以下に下がった場合のみフィット表示(0)にスナップする
-        if (currentZoom <= fitZoom) {
-            currentZoom = 0;
-        } else if (currentZoom > MAX_ZOOM) {
-            currentZoom = MAX_ZOOM;
+        if (t.currentZoom <= fitZoom) {
+            t.currentZoom = 0;
+        } else if (t.currentZoom > MAX_ZOOM) {
+            t.currentZoom = MAX_ZOOM;
         }
 
-        const newEffectiveZoom = currentZoom === 0 ? fitZoom : currentZoom;
+        const newEffectiveZoom = t.currentZoom === 0 ? fitZoom : t.currentZoom;
+        const activeWs = t.ws;
 
-        Object.keys(tracks).forEach(trackId => {
-            const t = tracks[trackId];
-            const wsA = t.layers.A.ws;
-            const wsB = t.layers.B.ws;
-            const activeWs = t.ws;
+        if (activeWs && activeWs.getDuration() > 0) {
+            const scrollContainer = activeWs.renderer.scrollContainer;
+            const containerRect = scrollContainer.getBoundingClientRect();
+            const mouseXInContainer = Math.max(0, mouseClientX - containerRect.left);
 
-            if (activeWs && activeWs.getDuration() > 0) {
-                const duration = activeWs.getDuration();
-                const scrollContainer = activeWs.renderer.scrollContainer;
-                const containerRect = scrollContainer.getBoundingClientRect();
-                const mouseXInContainer = Math.max(0, mouseClientX - containerRect.left);
+            const oldFullWidth = duration * oldEffectiveZoom;
+            const oldScrollLeft = scrollContainer.scrollLeft;
+            const contentPosUnderMouse = oldScrollLeft + mouseXInContainer;
 
-                const oldFullWidth = duration * oldEffectiveZoom;
-                const oldScrollLeft = scrollContainer.scrollLeft;
-                const contentPosUnderMouse = oldScrollLeft + mouseXInContainer;
+            activeWs.renderer._skipScrollCorrection = true;
+            activeWs.zoom(t.currentZoom === 0 ? false : t.currentZoom);
+            activeWs.renderer._skipScrollCorrection = false;
 
-                if (activeWs) {
-                    activeWs.renderer._skipScrollCorrection = true;
-                    activeWs.zoom(currentZoom === 0 ? false : currentZoom);
-                    activeWs.renderer._skipScrollCorrection = false;
-                }
+            const newFullWidth = duration * newEffectiveZoom;
+            const scaledPos = contentPosUnderMouse * (newFullWidth / oldFullWidth);
+            const newScrollLeft = Math.max(0, scaledPos - mouseXInContainer);
 
-                const newFullWidth = duration * newEffectiveZoom;
-                const scaledPos = contentPosUnderMouse * (newFullWidth / oldFullWidth);
-                const newScrollLeft = Math.max(0, scaledPos - mouseXInContainer);
-
-                scrollContainer.scrollLeft = newScrollLeft;
-                updateOverlayUI(trackId);
-                
-                // スクロールイベントが発火しない場合（0から0への移動など）に備えて明示的にWebGLを更新
-                if (t.webglWaveform) {
-                    t.webglWaveform.setView(newEffectiveZoom, newScrollLeft);
-                }
+            scrollContainer.scrollLeft = newScrollLeft;
+            updateOverlayUI(trackId);
+            
+            // スクロールイベントが発火しない場合（0から0への移動など）に備えて明示的にWebGLを更新
+            if (t.webglWaveform) {
+                t.webglWaveform.setView(newEffectiveZoom, newScrollLeft);
             }
-        });
+        }
     }
 }
-
-waveformsContainer.addEventListener('wheel', (e) => {
-    if (e.ctrlKey) {
-        e.preventDefault();
-
-        // deltaYを累積し、マウス位置を記録するだけ（重い処理はしない）
-        pendingZoomDelta += e.deltaY;
-        lastZoomMouseClientX = e.clientX;
-
-        // まだこのフレームでrAFを予約していなければ予約する
-        if (!zoomRAFId) {
-            zoomRAFId = requestAnimationFrame(applyPendingZoom);
-        }
-    }
-}, { passive: false });
 
 socket.on('connect', () => {
     document.body.className = 'status-waiting';
@@ -541,21 +513,21 @@ function getOrCreateTrackUI(trackId) {
     wsA.on('scroll', () => {
         updateOverlayUI(trackId);
         if (tracks[trackId].activeLayerKey === 'A') {
-            const pxPerSec = currentZoom === 0 ? (wsA.renderer.scrollContainer.clientWidth / wsA.getDuration()) : currentZoom;
+            const pxPerSec = tracks[trackId].currentZoom === 0 ? (wsA.renderer.scrollContainer.clientWidth / wsA.getDuration()) : tracks[trackId].currentZoom;
             webglWaveform.setView(pxPerSec, wsA.renderer.scrollContainer.scrollLeft);
         }
     });
     wsB.on('scroll', () => {
         updateOverlayUI(trackId);
         if (tracks[trackId].activeLayerKey === 'B') {
-            const pxPerSec = currentZoom === 0 ? (wsB.renderer.scrollContainer.clientWidth / wsB.getDuration()) : currentZoom;
+            const pxPerSec = tracks[trackId].currentZoom === 0 ? (wsB.renderer.scrollContainer.clientWidth / wsB.getDuration()) : tracks[trackId].currentZoom;
             webglWaveform.setView(pxPerSec, wsB.renderer.scrollContainer.scrollLeft);
         }
     });
     wsC.on('scroll', () => {
         updateOverlayUI(trackId);
         if (tracks[trackId].activeLayerKey === 'C') {
-            const pxPerSec = currentZoom === 0 ? (wsC.renderer.scrollContainer.clientWidth / wsC.getDuration()) : currentZoom;
+            const pxPerSec = tracks[trackId].currentZoom === 0 ? (wsC.renderer.scrollContainer.clientWidth / wsC.getDuration()) : tracks[trackId].currentZoom;
             webglWaveform.setView(pxPerSec, wsC.renderer.scrollContainer.scrollLeft);
         }
     });
@@ -576,6 +548,10 @@ function getOrCreateTrackUI(trackId) {
         },
         webglWaveform: webglWaveform,
         activeLayerKey: 'A',
+        currentZoom: 0,
+        pendingZoomDelta: 0,
+        lastZoomMouseClientX: 0,
+        zoomRAFId: null,
         // ゲッター/セッターを用いて既存コードからの後方互換性を保つ
         get ws() { return this.layers[this.activeLayerKey].ws; },
         get loadedUrl() { return this.layers[this.activeLayerKey].url; },
@@ -602,6 +578,18 @@ function getOrCreateTrackUI(trackId) {
         markerData: null
     };
 
+    waveContainer.addEventListener('wheel', (e) => {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            const t = tracks[trackId];
+            t.pendingZoomDelta += e.deltaY;
+            t.lastZoomMouseClientX = e.clientX;
+            if (!t.zoomRAFId) {
+                t.zoomRAFId = requestAnimationFrame(() => applyPendingZoom(trackId));
+            }
+        }
+    }, { passive: false });
+
     const onReadyA = () => {
         tracks[trackId].layers.A.isReady = true;
         webglWaveform.resize();
@@ -612,14 +600,14 @@ function getOrCreateTrackUI(trackId) {
             webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'A');
         }
         
-        if (currentZoom !== 0) {
-            tracks[trackId].layers.A.ws.zoom(currentZoom);
+        if (tracks[trackId].currentZoom !== 0) {
+            tracks[trackId].layers.A.ws.zoom(tracks[trackId].currentZoom);
         }
         
         // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
         if (tracks[trackId].activeLayerKey === 'A') {
             const scrollContainer = wsA.renderer.scrollContainer;
-            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / wsA.getDuration()) : currentZoom;
+            const pxPerSec = tracks[trackId].currentZoom === 0 ? (scrollContainer.clientWidth / wsA.getDuration()) : tracks[trackId].currentZoom;
             webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
         }
         
@@ -637,14 +625,14 @@ function getOrCreateTrackUI(trackId) {
             webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'B');
         }
         
-        if (currentZoom !== 0) {
-            tracks[trackId].layers.B.ws.zoom(currentZoom);
+        if (tracks[trackId].currentZoom !== 0) {
+            tracks[trackId].layers.B.ws.zoom(tracks[trackId].currentZoom);
         }
         
         // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
         if (tracks[trackId].activeLayerKey === 'B') {
             const scrollContainer = wsB.renderer.scrollContainer;
-            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / wsB.getDuration()) : currentZoom;
+            const pxPerSec = tracks[trackId].currentZoom === 0 ? (scrollContainer.clientWidth / wsB.getDuration()) : tracks[trackId].currentZoom;
             webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
         }
         
@@ -665,13 +653,13 @@ function getOrCreateTrackUI(trackId) {
             webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'C');
         }
         
-        if (currentZoom !== 0) {
-            tracks[trackId].layers.C.ws.zoom(currentZoom);
+        if (tracks[trackId].currentZoom !== 0) {
+            tracks[trackId].layers.C.ws.zoom(tracks[trackId].currentZoom);
         }
         
         if (tracks[trackId].activeLayerKey === 'C') {
             const scrollContainer = wsC.renderer.scrollContainer;
-            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / wsC.getDuration()) : currentZoom;
+            const pxPerSec = tracks[trackId].currentZoom === 0 ? (scrollContainer.clientWidth / wsC.getDuration()) : tracks[trackId].currentZoom;
             webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
         }
         
@@ -766,13 +754,13 @@ socket.on('clip_playing', (data) => {
         
         // 新しくアクティブになった WaveSurfer に現在のズーム倍率を適用
         if (t.ws && t.ws.getDecodedData()) {
-            t.ws.zoom(currentZoom === 0 ? false : currentZoom);
+            t.ws.zoom(t.currentZoom === 0 ? false : t.currentZoom);
             // WebGL側は事前に転送（プリレンダリング）が完了しているため、アクティブレイヤーをスワップするだけで完了
             t.webglWaveform.setActiveLayer(swapTargetKey);
             
             // スワップ直後に最新のズームとスクロール位置をWebGLに同期する
             const scrollContainer = t.ws.renderer.scrollContainer;
-            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / t.ws.getDuration()) : currentZoom;
+            const pxPerSec = t.currentZoom === 0 ? (scrollContainer.clientWidth / t.ws.getDuration()) : t.currentZoom;
             t.webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
         }
         
