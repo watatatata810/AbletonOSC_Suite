@@ -310,6 +310,7 @@ button:active {
     color: rgba(255, 255, 255, 0.85);
     pointer-events: none;
     padding-right: 5px;
+    margin-left: auto;
     transition: color 0.4s ease-in-out, transform 0.4s ease-in-out;
 }
 
@@ -370,3 +371,6 @@ button:active {
     align-items: center;
 }
 
+body.hide-badges .badges-wrapper {
+    display: none !important;
+}

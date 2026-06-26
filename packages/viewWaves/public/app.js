@@ -1139,6 +1139,7 @@ function updateTrackMarkers(t) {
 // ==========================================
 const digitalClock = document.getElementById('digital-clock');
 const clockToggle = document.getElementById('clock-toggle');
+const badgeToggle = document.getElementById('badge-toggle');
 
 // グローバル設定変数
 let autoScrollMode = 'center'; // 'center', 'page', 'off'
@@ -1147,6 +1148,17 @@ let autoScrollMode = 'center'; // 'center', 'page', 'off'
 if (clockToggle && digitalClock) {
     clockToggle.addEventListener('change', (e) => {
         digitalClock.style.display = e.target.checked ? 'block' : 'none';
+    });
+}
+
+// バッジの表示・非表示切り替え
+if (badgeToggle) {
+    badgeToggle.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            document.body.classList.remove('hide-badges');
+        } else {
+            document.body.classList.add('hide-badges');
+        }
     });
 }
 
