@@ -228,73 +228,37 @@ function updatePlayheadUI(trackId, progress) {
 /**
  * 次のシーンの準備完了状態（Next Readyバッジ）を更新する
  */
-function updateNextReadyUI(trackId) {
+function updateLayerBadgesUI(trackId) {
     const t = tracks[trackId];
-    if (!t || !t.nextReadyBadge) return;
-    
-    const nextSlot = t.currentSceneIndex + 1;
-    let isNextReady = false;
+    if (!t || !t.layerBadges) return;
     
     Object.keys(t.layers).forEach(key => {
-        if (key !== t.activeLayerKey) {
-            const layer = t.layers[key];
-            if (layer.slotIndex === nextSlot && layer.isReady) {
-                isNextReady = true;
-            }
-        }
-    });
-    
-    if (isNextReady) {
-        t.nextReadyBadge.classList.add('visible');
-    } else {
-        t.nextReadyBadge.classList.remove('visible');
-    }
-}
-
-function updatePreLoadBadgeUI(trackId) {
-    const t = tracks[trackId];
-    if (!t || !t.preLoadBadge) return;
-    
-    if (selectedSceneIndex < 0 || t.currentSceneIndex === selectedSceneIndex) {
-        t.preLoadBadge.classList.remove('visible');
-        return;
-    }
-    
-    let isPreLoaded = false;
-    
-    Object.keys(t.layers).forEach(key => {
-        if (key !== t.activeLayerKey) {
-            const layer = t.layers[key];
-            if (layer.slotIndex === selectedSceneIndex && layer.isReady) {
-                isPreLoaded = true;
-            }
-        }
-    });
-    
-    if (isPreLoaded) {
-        t.preLoadBadge.classList.add('visible');
-    } else {
-        t.preLoadBadge.classList.remove('visible');
-    }
-}
-
-function updateDebugDisplayUI(trackId) {
-    const t = tracks[trackId];
-    if (!t || !t.debugEl) return;
-    
-    const states = Object.keys(t.layers).map(key => {
         const layer = t.layers[key];
-        const isActive = t.activeLayerKey === key ? '★' : '';
-        let stateStr = '-';
-        if (layer.url) {
-            const sceneNum = layer.slotIndex + 1;
-            const status = layer.isReady ? 'R' : 'L';
-            stateStr = `S${sceneNum}(${status})`;
+        const badge = t.layerBadges[key];
+        
+        badge.className = 'layer-badge';
+        
+        const isActive = t.activeLayerKey === key && layer.url;
+        const prefix = isActive ? '<span class="badge-prefix">▶</span> ' : '<span class="badge-prefix"></span>';
+        
+        if (isActive) {
+            badge.classList.add('active');
         }
-        return `${isActive}${key}:${stateStr}`;
+        
+        if (!layer.url) {
+            badge.classList.add('status-empty');
+            badge.innerHTML = `${prefix}${key} : ---`;
+        } else {
+            const sceneNum = layer.slotIndex + 1;
+            if (layer.isReady) {
+                badge.classList.add('status-ready');
+                badge.innerHTML = `${prefix}${key} : Scene ${sceneNum}`;
+            } else {
+                badge.classList.add('status-loading');
+                badge.innerHTML = `${prefix}${key} : Scene ${sceneNum} <span class="badge-spinner">↺</span>`;
+            }
+        }
     });
-    
-    t.debugEl.textContent = states.join(' | ');
 }
 
 /**
@@ -526,20 +490,14 @@ function getOrCreateTrackUI(trackId) {
     const badgesWrapper = document.createElement('div');
     badgesWrapper.className = 'badges-wrapper';
     
-    const nextReadyBadge = document.createElement('div');
-    nextReadyBadge.className = 'next-ready-badge';
-    nextReadyBadge.textContent = 'NEXT READY';
-    
-    const preLoadBadge = document.createElement('div');
-    preLoadBadge.className = 'pre-load-badge';
-    preLoadBadge.textContent = 'PRE LOAD';
-    
-    badgesWrapper.appendChild(nextReadyBadge);
-    badgesWrapper.appendChild(preLoadBadge);
-    
-    const debugDisplay = document.createElement('div');
-    debugDisplay.className = 'debug-display';
-    debugDisplay.textContent = 'A: - | B: - | C: -';
+    const layerBadges = {};
+    ['A', 'B', 'C'].forEach(key => {
+        const badge = document.createElement('div');
+        badge.className = 'layer-badge status-empty';
+        badge.innerHTML = `<span class="badge-prefix"></span>${key} : ---`;
+        badgesWrapper.appendChild(badge);
+        layerBadges[key] = badge;
+    });
     
     const timeDisplay = document.createElement('div');
     timeDisplay.className = 'time-display';
@@ -547,7 +505,6 @@ function getOrCreateTrackUI(trackId) {
     timeDisplay.textContent = '00:00 / -00:00';
     
     footerRow.appendChild(badgesWrapper);
-    footerRow.appendChild(debugDisplay);
     footerRow.appendChild(timeDisplay);
     
     waveContainer.appendChild(wsLayerA);
@@ -628,9 +585,7 @@ function getOrCreateTrackUI(trackId) {
         titleEl: title,
         boxEl: box,
         timeEl: timeDisplay,
-        nextReadyBadge: nextReadyBadge,
-        preLoadBadge: preLoadBadge,
-        debugEl: debugDisplay,
+        layerBadges: layerBadges,
         currentSceneIndex: -1,
         fileName: null,
         sceneName: null,
@@ -669,9 +624,7 @@ function getOrCreateTrackUI(trackId) {
         }
         
         updateTrackMarkers(tracks[trackId]);
-        updateNextReadyUI(trackId);
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         sortVisibleTracks();
     };
     const onReadyB = () => {
@@ -696,9 +649,7 @@ function getOrCreateTrackUI(trackId) {
         }
         
         updateTrackMarkers(tracks[trackId]);
-        updateNextReadyUI(trackId);
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         sortVisibleTracks();
     };
     
@@ -725,9 +676,7 @@ function getOrCreateTrackUI(trackId) {
         }
         
         updateTrackMarkers(tracks[trackId]);
-        updatePreLoadBadgeUI(trackId);
-        updateNextReadyUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         sortVisibleTracks();
     };
     
@@ -789,9 +738,7 @@ socket.on('clip_playing', (data) => {
     // すでにアクティブなレイヤーで読み込み済みの場合は何もしない
     if (t.layers[t.activeLayerKey].url === url) {
         t.layers[t.activeLayerKey].slotIndex = slotIndex;
-        updateNextReadyUI(trackId);
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         return;
     }
     
@@ -835,9 +782,7 @@ socket.on('clip_playing', (data) => {
         activeLayer.isReady = false;
         activeLayer.ws.empty();
         
-        updateNextReadyUI(trackId);
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         
         console.log(`[Swap] Track ${trackId + 1} instantly switched to preloaded layer ${swapTargetKey}`);
     } else {
@@ -851,9 +796,7 @@ socket.on('clip_playing', (data) => {
         // 新規ロード時には、現在のアクティブレイヤーを描画対象として設定しておく
         t.webglWaveform.setActiveLayer(t.activeLayerKey);
         
-        updateNextReadyUI(trackId);
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         activeLayer.ws.load(url).catch(err => {
             if (err.name !== 'AbortError') console.error('WaveSurfer load error:', err);
         });
@@ -880,9 +823,7 @@ socket.on('clip_stopped', (data) => {
         // WebGLバッファメモリを解放して描画をクリア
         t.webglWaveform.clear();
         
-        updateNextReadyUI(trackId);
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         updateTrackTitle(trackId);
         
         // アニメーションを停止し、変数をリセット
@@ -1056,8 +997,7 @@ socket.on('track_name', (data) => {
 socket.on('selected_scene_changed', (data) => {
     selectedSceneIndex = data.sceneIndex;
     Object.keys(tracks).forEach(trackId => {
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
     });
 });
 
@@ -1077,8 +1017,7 @@ socket.on('clip_preload', (data) => {
         }
     });
     if (exists) {
-        updateNextReadyUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         return;
     }
     
@@ -1098,9 +1037,7 @@ socket.on('clip_preload', (data) => {
     layer.slotIndex = slotIndex;
     layer.isReady = false;
     
-    updateNextReadyUI(trackId);
-    updatePreLoadBadgeUI(trackId);
-    updateDebugDisplayUI(trackId);
+    updateLayerBadgesUI(trackId);
     
     layer.ws.load(url).catch(err => {
         if (err.name !== 'AbortError') console.error('Preload WaveSurfer load error:', err);
@@ -1123,8 +1060,7 @@ socket.on('clip_selected_preload', (data) => {
         }
     });
     if (exists) {
-        updatePreLoadBadgeUI(trackId);
-        updateDebugDisplayUI(trackId);
+        updateLayerBadgesUI(trackId);
         return;
     }
     
@@ -1145,9 +1081,7 @@ socket.on('clip_selected_preload', (data) => {
     layer.slotIndex = slotIndex;
     layer.isReady = false;
     
-    updatePreLoadBadgeUI(trackId);
-    updateNextReadyUI(trackId);
-    updateDebugDisplayUI(trackId);
+    updateLayerBadgesUI(trackId);
     
     layer.ws.load(url).catch(err => {
         if (err.name !== 'AbortError') console.error('Selected preload WaveSurfer load error:', err);
@@ -1170,8 +1104,7 @@ socket.on('clip_selected_preload_empty', (data) => {
         }
     });
     
-    updatePreLoadBadgeUI(trackId);
-    updateDebugDisplayUI(trackId);
+    updateLayerBadgesUI(trackId);
 });
 
 // マーカー情報を受信したときの処理

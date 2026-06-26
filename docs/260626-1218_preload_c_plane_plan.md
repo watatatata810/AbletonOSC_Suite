@@ -700,15 +700,134 @@ git commit -m "feat: add layer C to app.js, implement 3-plane dynamic buffering 
 
 ---
 
+### Task 5: 3面ステータスバッジのリッチ表示と統合（バッジリッチ化）
+
+**Files:**
+* Modify: [style.css](file:///c:/Users/watat/Documents/MySoftwares/AbletonOSC_Suite/packages/viewWaves/public/style.css)
+* Modify: [app.js](file:///c:/Users/watat/Documents/MySoftwares/AbletonOSC_Suite/packages/viewWaves/public/app.js)
+
+**Interfaces:**
+* Produces: 3面ステータスバッジのビジュアル表示と一本化された UI 更新処理 `updateLayerBadgesUI(trackId)`
+
+- [ ] **Step 1: style.css に .layer-badge のスタイルと回転アニメーション定義を追加する**
+  * 先ほどの `.debug-display` や旧バッジ用のスタイルを整理します。
+  ```css
+  .layer-badge {
+      font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.4);
+      background-color: rgba(255, 255, 255, 0.03);
+      transition: all 0.3s ease;
+  }
+  .layer-badge.status-empty {
+      border-style: dashed;
+      color: rgba(255, 255, 255, 0.2);
+  }
+  .layer-badge.status-loading {
+      color: #2196F3;
+      background-color: rgba(33, 150, 243, 0.08);
+      border-color: rgba(33, 150, 243, 0.3);
+  }
+  .layer-badge.status-ready {
+      color: #4CAF50;
+      background-color: rgba(76, 175, 80, 0.08);
+      border-color: rgba(76, 175, 80, 0.3);
+  }
+  .layer-badge.active {
+      color: #121212;
+      background-color: var(--accent-color);
+      border-color: var(--accent-color);
+      box-shadow: 0 0 8px rgba(255, 152, 0, 0.4);
+  }
+  .badge-spinner {
+      display: inline-block;
+      animation: badge-spin 1.5s linear infinite;
+  }
+  @keyframes badge-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(-360deg); }
+  }
+  ```
+
+- [ ] **Step 2: app.js の getOrCreateTrackUI を更新し、A, B, C の3つのバッジ要素を作成・保持する**
+  * `nextReadyBadge` と `preLoadBadge`、`debugDisplay` の作成部分を、A, B, C 面バッジオブジェクトのループ作成に変更します。
+  * `footerRow` にバッジラッパーを追加し、3つのバッジを格納します。
+  ```javascript
+  const badgesWrapper = document.createElement('div');
+  badgesWrapper.className = 'badges-wrapper';
+  
+  const layerBadges = {};
+  ['A', 'B', 'C'].forEach(key => {
+      const badge = document.createElement('div');
+      badge.className = 'layer-badge status-empty';
+      badge.innerHTML = `<span class="badge-prefix"></span>${key} : ---`;
+      badgesWrapper.appendChild(badge);
+      layerBadges[key] = badge;
+  });
+  ```
+
+- [ ] **Step 3: app.js に一元管理関数 updateLayerBadgesUI を追加し、既存の更新処理を廃止・マージする**
+  * `updateNextReadyUI`, `updatePreLoadBadgeUI`, `updateDebugDisplayUI` をすべて廃止（削除）し、代わりに以下を実装します。
+  ```javascript
+  function updateLayerBadgesUI(trackId) {
+      const t = tracks[trackId];
+      if (!t || !t.layerBadges) return;
+      
+      Object.keys(t.layers).forEach(key => {
+          const layer = t.layers[key];
+          const badge = t.layerBadges[key];
+          
+          badge.className = 'layer-badge';
+          
+          const isActive = t.activeLayerKey === key && layer.url;
+          const prefix = isActive ? '<span class="badge-prefix">▶</span> ' : '<span class="badge-prefix"></span>';
+          
+          if (isActive) {
+              badge.classList.add('active');
+          }
+          
+          if (!layer.url) {
+              badge.classList.add('status-empty');
+              badge.innerHTML = `${prefix}${key} : ---`;
+          } else {
+              const sceneNum = layer.slotIndex + 1;
+              if (layer.isReady) {
+                  badge.classList.add('status-ready');
+                  badge.innerHTML = `${prefix}${key} : Scene ${sceneNum}`;
+              } else {
+                  badge.classList.add('status-loading');
+                  badge.innerHTML = `${prefix}${key} : Scene ${sceneNum} <span class="badge-spinner">↺</span>`;
+              }
+          }
+      });
+  }
+  ```
+  * `wsA`/`wsB`/`wsC` の `ready` コールバックや、各種 `socket.on` イベントハンドラから `updateLayerBadgesUI(trackId)` を呼び出します。
+
+- [ ] **Step 4: 変更をコミットする**
+  ```bash
+  git add packages/viewWaves/public/style.css packages/viewWaves/public/app.js
+  git commit -m "feat: implement 3-plane layer status badges with rich spinners"
+  ```
+
+---
+
 ## Verification Plan
 
 ### Automated Tests
 * なし (本リポジトリは GUI および OSC 連携のため自動テスト環境が存在しない)
 
 ### Manual Verification
-1. `packages/viewWaves` のサーバーを起動する (`node server.js` または該当のバッチ起動)。
+1. `packages/viewWaves` のサーバーを起動する (`node server.js`)。
 2. Ableton Live を起動し、シーンを選択する。
-3. 選択シーンを変更し、300ms 経過後にサーバーのログで `[Live] Debounce expired. Preloading scene X` が出力されることを確認。
-4. クライアントブラウザで、`NEXT READY` バッジの右側に青色の `PRE LOAD` バッジが表示されることを確認。
-5. 選択シーンを発火（再生開始）した際、波形が一瞬で描画され、遅延がないことを確認。
-6. ロード中（プリロード中）に別のシーンを高速で切り替えて、バッジ表示のバグやクラッシュが発生しないことを確認。
+3. 選択シーンを変更した際、LOADING面バッジ「A : Scene 1 ↺」がスピンしつつ青色で表示されることを確認。
+4. デバウンス＆デコードが完了したらバッジがREADY状態「A : Scene 1」として緑色に変わることを確認。
+5. 再生中の面に対応するバッジが「▶ A : Scene 1」としてオレンジ色で強調表示されていることを確認。
+6. ロード中（プリロード中）に別のシーンを高速で切り替えて、バッジ表示 of バグやクラッシュが発生しないことを確認。

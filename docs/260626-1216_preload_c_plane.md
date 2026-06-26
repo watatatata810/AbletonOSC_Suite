@@ -102,26 +102,74 @@
 
 ### 5.2. DOM 構造の変更
 * `footer-row` にバッジを並べるための `.badges-wrapper` を追加し、その中に `next-ready-badge` と `pre-load-badge` を配置します。
-* `footer-row` の中央に、A, B, C 面のロード・再生状態をデバッグ表示するための `.debug-display` を追加します。
-* `ready` 受信時に、非アクティブなレイヤーの中で `slotIndex` が選択中シーンと一致し、且つロード完了していれば `pre-load-badge` に `.visible` クラスを付与します。
+* `footer-row` 内に、A, B, C 各面のロード・再生状態を表す3つのバッジ要素を追加します。
+* `ready` 受信時に、非アクティブなレイヤーの中で `slotIndex` が選択中シーンと一致し、且つロード完了していれば `pre-load-badge`（必要に応じて処理）または3面バッファ自体のREADY状態を表現します。
 
 ---
 
-## 6. UI常時デバッグ表示 (debug-display)
+## 6. 3面ステータスバッジ (layer-badge)
 
 ### 6.1. CSS 定義
 ```css
-.debug-display {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+.layer-badge {
+    font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-size: 11px;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.4);
-    pointer-events: none;
-    white-space: nowrap;
+    background-color: rgba(255, 255, 255, 0.03);
+    transition: all 0.3s ease;
+}
+
+.layer-badge.status-empty {
+    border-style: dashed;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+.layer-badge.status-loading {
+    color: #2196F3;
+    background-color: rgba(33, 150, 243, 0.08);
+    border-color: rgba(33, 150, 243, 0.3);
+}
+
+.layer-badge.status-ready {
+    color: #4CAF50;
+    background-color: rgba(76, 175, 80, 0.08);
+    border-color: rgba(76, 175, 80, 0.3);
+}
+
+.layer-badge.active {
+    color: #121212;
+    background-color: var(--accent-color); /* オレンジ #ff9800 */
+    border-color: var(--accent-color);
+    box-shadow: 0 0 8px rgba(255, 152, 0, 0.4);
+}
+
+.badge-spinner {
+    display: inline-block;
+    animation: badge-spin 1.5s linear infinite;
+}
+
+@keyframes badge-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(-360deg); }
 }
 ```
 
-### 6.2. 表示更新ロジック (app.js)
-* 各トラックにデバッグテキストを表示するための DOM `debugEl` を保持します。
-* 以下のタイミングで各面の状態（`★`: 再生中, `S`: シーン番号, `R`: ロード済, `L`: ロード中, `-`: 空）を集計・表示更新する `updateDebugDisplayUI(trackId)` を呼び出します。
+### 6.2. バッジの状態表現
+* **アクティブ面** (現在再生中): `▶ A : Scene 1` (バッジをオレンジ強調)
+* **READY面** (ロード完了してスタンバイ): `A : Scene 1` (バッジを緑枠線表示)
+* **LOADING面** (ロード中): `A : Scene 1 ↺` (スピンする回転矢印、青枠線表示)
+* **EMPTY面** (空状態): `A : ---` (グレー破線表示)
+
+### 6.3. 表示更新ロジック (app.js)
+* `updateLayerBadgesUI(trackId)` に表示制御を一本化します。
+* 以下のタイミングで各面の表示状態を自動的に再描画します。
   * `wsA` / `wsB` / `wsC` の `ready` 時
-  * `clip_playing` / `clip_preload` / `clip_selected_preload` / `clip_selected_preload_empty` / `clip_stopped` の受信時
+  * 各種ソケットイベント（`clip_playing`, `clip_preload`, `clip_selected_preload`, `clip_selected_preload_empty`, `clip_stopped`）の受信時
+
