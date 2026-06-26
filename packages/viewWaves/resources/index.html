@@ -41,11 +41,11 @@
     <script>
       const checkServer = () => {
         // Expressサーバーが立ち上がるまでポーリングし続ける
-        fetch('http://localhost:3000/')
+        fetch('http://127.0.0.1:3000/')
           .then(res => {
             if (res.ok) {
               // サーバーが応答したら、実際の画面へリダイレクト
-              window.location.replace('http://localhost:3000');
+              window.location.replace('http://127.0.0.1:3000');
             } else {
               setTimeout(checkServer, 200);
             }
