@@ -335,3 +335,31 @@ button:active {
     max-height: 0;
     margin-bottom: 0;
 }
+
+.pre-load-badge {
+    font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 12px;
+    font-weight: bold;
+    color: #2196F3; /* Blue */
+    background-color: rgba(33, 150, 243, 0.15);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(33, 150, 243, 0.3);
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+}
+
+.pre-load-badge.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.badges-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
