@@ -1,0 +1,8 @@
+{
+  "name": "launcher-service",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "tree-kill": "^1.2.2"
+  }
+}
