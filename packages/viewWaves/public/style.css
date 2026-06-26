@@ -363,3 +363,11 @@ button:active {
     align-items: center;
 }
 
+.debug-display {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
