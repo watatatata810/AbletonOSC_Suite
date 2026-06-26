@@ -1,0 +1,9 @@
+{
+  "name": "suite-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "main": "run.js",
+  "scripts": {
+    "start": "node run.js"
+  }
+}

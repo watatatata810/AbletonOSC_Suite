@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "jp.watatatata810.abletonosc-launcher",
+  "version": "1.0.0",
+  "singleInstance": true,
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "/resources/",
+  "url": "/index.html",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "enableExtensions": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": true
+  },
+  "nativeAllowList": [
+    "app.*",
+    "os.*"
+  ],
+  "extensions": [
+    {
+      "id": "js.neutralino.launcherservice",
+      "command": "node extensions/launcher-service/index.js"
+    }
+  ],
+  "modes": {
+    "window": {
+      "title": "AbletonOSC Suite Launcher",
+      "width": 900,
+      "height": 600,
+      "minWidth": 600,
+      "minHeight": 400,
+      "center": true,
+      "alwaysOnTop": false,
+      "icon": "/resources/favicon.ico",
+      "enableInspector": true,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "neutralino",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/resources/js/neutralino.js",
+    "binaryVersion": "6.8.0",
+    "clientVersion": "6.8.0"
+  }
+}
