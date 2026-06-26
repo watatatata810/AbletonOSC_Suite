@@ -1,7 +1,9 @@
 {
   "global": {
     "abletonHost": "127.0.0.1",
-    "abletonPort": 11000
+    "abletonPort": 11000,
+    "httpHost": "0.0.0.0",
+    "debug": false
   },
   "oscRouter": {
     "host": "127.0.0.1",
@@ -9,7 +11,8 @@
   },
   "viewWaves": {
     "httpPort": 3000,
-    "oscPort": 11002
+    "oscPort": 11002,
+    "pollInterval": 500
   },
   "daihonTrigger": {
     "httpPort": 3001,

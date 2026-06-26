@@ -19,6 +19,7 @@ const configPath = path.join(__dirname, '..', '..', 'config.json');
 const config = loadConfig(configPath);
 
 const HTTP_PORT = config.daihonTrigger?.httpPort ?? (process.env.PORT || 3001); 
+const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
 // AbletonOSCが待ち受けるポート（Ableton Live側で設定されている受信ポート）
 const ABLETON_OSC_HOST = config.global?.abletonHost ?? '127.0.0.1';
 const ABLETON_OSC_PORT = config.global?.abletonPort ?? (process.env.ABLETON_PORT || 11000); 
@@ -196,7 +197,9 @@ const queryOsc = (address, ...args) => {
 
 // OSCメッセージ全体を監視（他のアプリからの影響確認用）
 oscServer.on('message', (msg) => {
-    // console.log(`[OSC Received] ${msg}`); // デバッグ用のためコメントアウト
+    if (config.global?.debug) {
+        console.log(`[OSC Received in DaihonTrigger]`, msg);
+    }
 });
 
 // データ保存用のグローバルPromiseキュー
@@ -382,7 +385,7 @@ io.on('connection', (socket) => {
 });
 
 // サーバー起動処理
-server.listen(HTTP_PORT, '0.0.0.0', () => {
+server.listen(HTTP_PORT, HTTP_HOST, () => {
     console.log('\n=============================================');
     console.log(`台本トリガーサーバーが起動しました`);
     console.log('=============================================');

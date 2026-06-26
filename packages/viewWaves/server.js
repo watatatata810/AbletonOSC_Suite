@@ -49,6 +49,7 @@ process.stderr.on('error', (err) => {
 });
 
 const WEB_PORT = config.viewWaves?.httpPort ?? (process.env.PORT || 3000);
+const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
 
 // CORS設定：Neutralinojsの待機画面からのアクセスを許可するため、一番最初に定義する
 app.use((req, res, next) => {
@@ -128,6 +129,7 @@ let selectedSceneTimer = null;
 
 // ポーリング処理：0.5秒に1回実行されるが、マーカー情報は2秒に1回に間引く
 let pollCounter = 0;
+const POLL_INTERVAL = config.viewWaves?.pollInterval ?? 500;
 setInterval(() => {
     pollCounter++;
     
@@ -168,10 +170,13 @@ setInterval(() => {
             }
         }
     }
-}, 500);
+}, POLL_INTERVAL);
 
 // AbletonOSCからのメッセージ受信
 oscServer.on('message', (msg) => {
+    if (config.global?.debug) {
+        console.log(`[OSC Received in viewWaves]`, msg);
+    }
     const address = msg[0];
     const args = msg.slice(1);
 
@@ -499,9 +504,9 @@ io.on('connection', (socket) => {
     });
 });
 
-function startServer(port, retries) {
-    server.listen(port, () => {
-        console.log(`[Server] Web server running at http://localhost:${port}`);
+function startServer(port, host, retries) {
+    server.listen(port, host, () => {
+        console.log(`[Server] Web server running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
         console.log(`[Server] Waiting for browser to connect...`);
     }).on('error', (err) => {
         if (err.code === 'EADDRINUSE' && retries > 0) {
@@ -529,4 +534,4 @@ function startServer(port, retries) {
     });
 }
 
-startServer(WEB_PORT, 10); // 最大5秒間（500ms x 10回）リトライする
+startServer(WEB_PORT, HTTP_HOST, 10); // 最大5秒間（500ms x 10回）リトライする
