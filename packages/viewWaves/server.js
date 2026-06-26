@@ -123,6 +123,8 @@ const playingSlots = {}; // key: trackId, value: slotIndex
 let clipLengths = {}; // { "trackId_slotIndex": length, "trackId_slotIndex_start": startMarker, ... }
 let currentTempo = 120.0;
 let serverIsPlaying = false;
+let selectedSceneIndex = -1;
+let selectedSceneTimer = null;
 
 // ポーリング処理：0.5秒に1回実行されるが、マーカー情報は2秒に1回に間引く
 let pollCounter = 0;
@@ -184,6 +186,10 @@ oscServer.on('message', (msg) => {
         // テンポ的監視開始
         oscClient.send('/live/song/start_listen/tempo');
         oscClient.send('/live/song/get/tempo');
+        
+        // 選択中シーンの監視と初期値取得
+        oscClient.send('/live/view/start_listen/selected_scene');
+        oscClient.send('/live/view/get/selected_scene');
         
         // 全トラックの再生状態を監視開始
         for (let i = 0; i < numTracks; i++) {
@@ -350,8 +356,73 @@ oscServer.on('message', (msg) => {
                 filePath: filePath
             });
         }
+        
+        // 選択されたシーンのパスが取得できた場合、プリロード用イベントを送信
+        if (selectedSceneIndex === slotIndex) {
+            if (filePath !== "NO_AUDIO") {
+                io.emit('clip_selected_preload', {
+                    trackId: trackId,
+                    slotIndex: slotIndex,
+                    filePath: filePath
+                });
+            } else {
+                io.emit('clip_selected_preload_empty', {
+                    trackId: trackId,
+                    slotIndex: slotIndex
+                });
+            }
+        }
+    }
+    else if (address === '/live/view/get/selected_scene' || address === '/live/view/selected_scene') {
+        const sceneIndex = args[0];
+        handleSelectedSceneChanged(sceneIndex);
     }
 });
+
+function handleSelectedSceneChanged(sceneIndex) {
+    if (selectedSceneIndex === sceneIndex) return;
+    
+    selectedSceneIndex = sceneIndex;
+    
+    if (selectedSceneTimer) {
+        clearTimeout(selectedSceneTimer);
+    }
+    
+    // 即時バッジ消去のためにクライアントに選択変更を通知
+    io.emit('selected_scene_changed', { sceneIndex });
+    
+    selectedSceneTimer = setTimeout(() => {
+        console.log(`[Live] Debounce expired. Preloading scene ${sceneIndex}`);
+        preloadSelectedScene(sceneIndex);
+    }, 300);
+}
+
+function preloadSelectedScene(sceneIndex) {
+    if (sceneIndex < 0) return;
+    
+    for (let trackId = 0; trackId < numTracks; trackId++) {
+        const cachedPath = clipLengths[`${trackId}_${sceneIndex}_file_path`];
+        
+        if (cachedPath !== undefined) {
+            if (cachedPath !== "NO_AUDIO") {
+                io.emit('clip_selected_preload', {
+                    trackId: trackId,
+                    slotIndex: sceneIndex,
+                    filePath: cachedPath
+                });
+            } else {
+                io.emit('clip_selected_preload_empty', {
+                    trackId: trackId,
+                    slotIndex: sceneIndex
+                });
+            }
+        } else {
+            // キャッシュがなければAbletonへパスと長さを問い合わせ
+            oscClient.send('/live/clip/get/file_path', trackId, sceneIndex);
+            oscClient.send('/live/clip/get/length', trackId, sceneIndex);
+        }
+    }
+}
 
 function emitMarkersIfReady(trackId, slotIndex, targetSocket = io) {
     const start = clipLengths[`${trackId}_${slotIndex}_start`];
@@ -388,6 +459,10 @@ io.on('connection', (socket) => {
         socket.emit('song_playing');
     } else {
         socket.emit('song_stopped');
+    }
+    
+    if (selectedSceneIndex >= 0) {
+        socket.emit('selected_scene_changed', { sceneIndex: selectedSceneIndex });
     }
     
     for (const trackId in activeClips) {
