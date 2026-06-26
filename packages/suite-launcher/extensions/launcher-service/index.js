@@ -18,6 +18,7 @@ function logToFile(msg) {
   }
 }
 const runningProcesses = {}; // { packageName: { process, pid, status } }
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // config.json の読み込み
 const configPath = path.join(__dirname, '..', '..', '..', '..', 'config.json');
@@ -54,13 +55,30 @@ function getLocalIP() {
 }
 
 // プロセスの起動
-function startPackage(pkgName) {
+async function startPackage(pkgName) {
   if (runningProcesses[pkgName] && runningProcesses[pkgName].status === 'running') {
     return { success: false, message: 'Already running' };
   }
 
   const pkg = packagesList.find(p => p.name === pkgName);
   if (!pkg) return { success: false, message: 'Package not found' };
+
+  // 依存パッケージのチェックと自動起動
+  if (pkg.dependencies && pkg.dependencies.length > 0) {
+    for (const depName of pkg.dependencies) {
+      const depProc = runningProcesses[depName];
+      if (!depProc || depProc.status !== 'running') {
+        logToFile(`[${pkgName}] Found dependency [${depName}] is not running. Starting [${depName}] first.`);
+        const depResult = await startPackage(depName);
+        if (!depResult.success) {
+          logToFile(`[${pkgName}] Failed to start dependency [${depName}]: ${depResult.message}`);
+          return { success: false, message: `Failed to start dependency [${depName}]: ${depResult.message}` };
+        }
+        logToFile(`[${pkgName}] Waiting 500ms for [${depName}] to initialize...`);
+        await sleep(500);
+      }
+    }
+  }
 
   const workspaceRoot = path.join(__dirname, '..', '..', '..', '..');
   const pkgDir = path.join(workspaceRoot, pkg.dir);
@@ -200,7 +218,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const data = JSON.parse(body);
         if (req.url === '/start') {
-          const result = startPackage(data.package);
+          const result = await startPackage(data.package);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } else if (req.url === '/stop') {
