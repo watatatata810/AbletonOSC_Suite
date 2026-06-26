@@ -4,8 +4,19 @@ const path = require('path');
 const os = require('os');
 const kill = require('tree-kill');
 const QRCode = require('qrcode');
+const fs = require('fs');
 
 const PORT = 3020;
+const logFilePath = path.join(__dirname, 'extension.log');
+
+function logToFile(msg) {
+  try {
+    const time = new Date().toISOString();
+    fs.appendFileSync(logFilePath, `[${time}] ${msg}\n`);
+  } catch (e) {
+    // ログ書き込み失敗時は無視
+  }
+}
 const runningProcesses = {}; // { packageName: { process, pid, status } }
 
 // config.json の読み込み
@@ -14,7 +25,7 @@ let appConfig = {};
 try {
   appConfig = require(configPath);
 } catch (e) {
-  console.error('Failed to load config.json', e);
+  logToFile('Failed to load config.json: ' + e.message);
 }
 
 // 管理対象パッケージ定義
@@ -93,19 +104,19 @@ function startPackage(pkgName) {
 
   // ログおよび終了監視
   if (child.stdout) {
-    child.stdout.on('data', (data) => console.log(`[${pkgName}] ${data.toString().trim()}`));
+    child.stdout.on('data', (data) => logToFile(`[${pkgName}] ${data.toString().trim()}`));
   }
   if (child.stderr) {
-    child.stderr.on('data', (data) => console.error(`[${pkgName}] ERR: ${data.toString().trim()}`));
+    child.stderr.on('data', (data) => logToFile(`[${pkgName}] ERR: ${data.toString().trim()}`));
   }
 
   child.on('close', (code) => {
-    console.log(`[${pkgName}] stopped with code ${code}`);
+    logToFile(`[${pkgName}] stopped with code ${code}`);
     runningProcesses[pkgName] = { status: 'stopped' };
   });
 
   child.on('error', (err) => {
-    console.error(`[${pkgName}] error:`, err);
+    logToFile(`[${pkgName}] error: ` + err.message);
     runningProcesses[pkgName] = { status: 'error', error: err.message };
   });
 
@@ -122,7 +133,7 @@ function stopPackage(pkgName) {
   return new Promise((resolve) => {
     kill(procInfo.pid, 'SIGKILL', (err) => {
       if (err) {
-        console.error(`Failed to kill process tree for ${pkgName}:`, err);
+        logToFile(`Failed to kill process tree for ${pkgName}: ` + err.message);
         resolve({ success: false, message: err.message });
       } else {
         runningProcesses[pkgName] = { status: 'stopped' };
@@ -210,20 +221,20 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[Launcher Extension] HTTP API Server running on port ${PORT}`);
+  logToFile(`[Launcher Extension] HTTP API Server running on port ${PORT}`);
 });
 
 // Poka-Yoke: プロセス親終了時のクリーンアップ
 function cleanup() {
-  console.log('[Launcher Extension] Cleaning up child processes...');
+  logToFile('[Launcher Extension] Cleaning up child processes...');
   const keys = Object.keys(runningProcesses);
   for (const key of keys) {
     if (runningProcesses[key]?.status === 'running') {
-      console.log(`Killing ${key} (PID: ${runningProcesses[key].pid})`);
+      logToFile(`Killing ${key} (PID: ${runningProcesses[key].pid})`);
       try {
         kill(runningProcesses[key].pid, 'SIGKILL');
       } catch (e) {
-        console.error(`Error killing ${key}:`, e);
+        logToFile(`Error killing ${key}: ` + e.message);
       }
     }
   }
