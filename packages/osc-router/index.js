@@ -12,13 +12,19 @@ const DEFAULT_CONFIG = {
 let config = { ...DEFAULT_CONFIG };
 
 const { loadConfig } = require('../shared-utils/configLoader');
-const configPath = path.join(__dirname, 'config.json');
+const configPath = path.join(__dirname, '..', '..', 'config.json');
 const parsed = loadConfig(configPath);
 
+// 各アプリケーションの OSC ポート設定を動的に収集
+const targetPorts = [];
+if (parsed.viewWaves?.oscPort) targetPorts.push(Number(parsed.viewWaves.oscPort));
+if (parsed.daihonTrigger?.oscPort) targetPorts.push(Number(parsed.daihonTrigger.oscPort));
+if (parsed.oscTester?.oscPort) targetPorts.push(Number(parsed.oscTester.oscPort));
+
 config = {
-  host: parsed.host || DEFAULT_CONFIG.host,
-  listenPort: parsed.listenPort !== undefined ? Number(parsed.listenPort) : DEFAULT_CONFIG.listenPort,
-  targetPorts: Array.isArray(parsed.targetPorts) ? parsed.targetPorts.map(Number) : DEFAULT_CONFIG.targetPorts
+  host: parsed.oscRouter?.host || DEFAULT_CONFIG.host,
+  listenPort: parsed.oscRouter?.listenPort !== undefined ? Number(parsed.oscRouter.listenPort) : DEFAULT_CONFIG.listenPort,
+  targetPorts: targetPorts.length > 0 ? targetPorts : DEFAULT_CONFIG.targetPorts
 };
 
 const LISTEN_PORT = config.listenPort;
@@ -31,8 +37,14 @@ const server = dgram.createSocket('udp4');
 const client = dgram.createSocket('udp4');
 
 server.on('error', (err) => {
-  console.log(`[Router Error] ${err.stack}`);
-  server.close();
+  console.error(`[Router Error] ${err.stack}`);
+  try {
+    server.close();
+  } catch (e) {}
+  try {
+    client.close();
+  } catch (e) {}
+  process.exit(1);
 });
 
 server.on('message', (msg, rinfo) => {
@@ -60,8 +72,16 @@ server.on('listening', () => {
 server.bind(LISTEN_PORT, HOST);
 
 // 終了時のクリーンアップ
-process.on('SIGINT', () => {
+const cleanup = () => {
+  console.log('\n[OSC Router] クリーンアップ処理を実行中...');
+  try {
     server.close();
+  } catch (e) {}
+  try {
     client.close();
-    process.exit();
-});
+  } catch (e) {}
+  process.exit(0);
+};
+
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);

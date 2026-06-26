@@ -3,6 +3,10 @@
     "abletonHost": "127.0.0.1",
     "abletonPort": 11000
   },
+  "oscRouter": {
+    "host": "127.0.0.1",
+    "listenPort": 11001
+  },
   "viewWaves": {
     "httpPort": 3000,
     "oscPort": 11002
