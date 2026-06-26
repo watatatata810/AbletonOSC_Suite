@@ -1,62 +1,51 @@
 <!DOCTYPE html>
-<html>
-  <head>
+<html lang="ja">
+<head>
     <meta charset="UTF-8">
-    <title>Ableton Waves</title>
-    <style>
-      body {
-        background-color: #2b2b2b;
-        color: #aaaaaa;
-        font-family: sans-serif;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-        margin: 0;
-      }
-      .loader {
-        text-align: center;
-      }
-      .spinner {
-        display: inline-block;
-        width: 30px;
-        height: 30px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: #ff9800;
-        animation: spin 1s ease-in-out infinite;
-        margin-bottom: 10px;
-      }
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="loader">
-      <div class="spinner"></div>
-      <div id="status">サーバーの起動を待機中...</div>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AbletonOSC Suite Launcher</title>
+    <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+    <header>
+        <h1>AbletonOSC Suite Launcher</h1>
+        <div class="header-info">
+            <span id="local-ip">検出中...</span>
+        </div>
+        <div class="header-actions">
+            <button id="btn-all-start" class="btn primary">すべて起動</button>
+            <button id="btn-all-stop" class="btn danger">すべて停止</button>
+        </div>
+    </header>
+
+    <main>
+        <div id="apps-grid" class="grid">
+            <!-- 動的生成されるアプリカード -->
+        </div>
+    </main>
+
+    <!-- QRコードポップアップモーダル -->
+    <div id="qr-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2>iPad等での接続用 QRコード</h2>
+            <p id="qr-url-text"></p>
+            <div id="qr-code-img-container"></div>
+        </div>
     </div>
-    
-    <script>
-      const checkServer = () => {
-        // Expressサーバーが立ち上がるまでポーリングし続ける
-        fetch('http://localhost:3000/')
-          .then(res => {
-            if (res.ok) {
-              // サーバーが応答したら、実際の画面へリダイレクト
-              window.location.replace('http://localhost:3000');
-            } else {
-              setTimeout(checkServer, 200);
-            }
-          })
-          .catch(() => {
-            setTimeout(checkServer, 200);
-          });
-      };
-      
-      // 0.2秒ごとに接続を試行
-      setTimeout(checkServer, 200);
-    </script>
-  </body>
+
+    <!-- ログコンソール -->
+    <footer>
+        <div class="console-header" id="console-toggle">
+            <span>コンソールログ</span>
+            <span class="toggle-icon">▲</span>
+        </div>
+        <div class="console-body" id="console-logs"></div>
+    </footer>
+
+    <script src="js/neutralino.js"></script>
+    <!-- QRコード生成ライブラリ (CDN/ローカルに代替可能、今回は安全なローカル生成APIまたはCDNを使用) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="js/main.js"></script>
+</body>
 </html>
