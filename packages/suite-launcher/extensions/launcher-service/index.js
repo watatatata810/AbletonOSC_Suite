@@ -28,13 +28,17 @@ try {
   logToFile('Failed to load config.json: ' + e.message);
 }
 
-// 管理対象パッケージ定義
-const packagesList = [
-  { name: 'osc-router', dir: 'packages/osc-router', type: 'node', startCmd: 'index.js' },
-  { name: 'viewWaves', dir: 'packages/viewWaves', type: 'neutralino' },
-  { name: 'DaihonTrigger', dir: 'packages/DaihonTrigger', type: 'node', startCmd: 'server.js', port: appConfig.daihonTrigger?.httpPort || 3001 },
-  { name: 'OscTester', dir: 'packages/OscTester', type: 'node', startCmd: 'server.js', port: appConfig.oscTester?.httpPort || 3010 }
-];
+// config.json からパッケージ定義をロード
+let packagesList = appConfig.packages || [];
+if (packagesList.length === 0) {
+  // 互換性フォールバック用の定義
+  packagesList = [
+    { name: 'osc-router', dir: 'packages/osc-router', type: 'node', startCmd: 'index.js' },
+    { name: 'viewWaves', dir: 'packages/viewWaves', type: 'neutralino' },
+    { name: 'DaihonTrigger', dir: 'packages/DaihonTrigger', type: 'node', startCmd: 'server.js', port: appConfig.daihonTrigger?.httpPort || 3001 },
+    { name: 'OscTester', dir: 'packages/OscTester', type: 'node', startCmd: 'server.js', port: appConfig.oscTester?.httpPort || 3010 }
+  ];
+}
 
 // ローカルIPの取得
 function getLocalIP() {

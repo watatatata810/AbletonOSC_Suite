@@ -5,6 +5,36 @@
     "httpHost": "0.0.0.0",
     "debug": false
   },
+  "packages": [
+    {
+      "name": "osc-router",
+      "dir": "packages/osc-router",
+      "type": "node",
+      "startCmd": "index.js"
+    },
+    {
+      "name": "viewWaves",
+      "dir": "packages/viewWaves",
+      "type": "neutralino",
+      "dependencies": ["osc-router"]
+    },
+    {
+      "name": "DaihonTrigger",
+      "dir": "packages/DaihonTrigger",
+      "type": "node",
+      "startCmd": "server.js",
+      "port": 3001,
+      "dependencies": ["osc-router"]
+    },
+    {
+      "name": "OscTester",
+      "dir": "packages/OscTester",
+      "type": "node",
+      "startCmd": "server.js",
+      "port": 3010,
+      "dependencies": ["osc-router"]
+    }
+  ],
   "oscRouter": {
     "host": "127.0.0.1",
     "listenPort": 11001
