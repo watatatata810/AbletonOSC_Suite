@@ -9,9 +9,9 @@ class WebGLWaveform {
         }
 
         this.color = options.color || [1.0, 0.5, 0.0, 1.0]; // Default orange-ish color
-        this.lods = { A: null, B: null };
-        this.lengths = { A: 0, B: 0 };
-        this.sampleRates = { A: 44100, B: 44100 };
+        this.lods = { A: null, B: null, C: null };
+        this.lengths = { A: 0, B: 0, C: 0 };
+        this.sampleRates = { A: 44100, B: 44100, C: 44100 };
         this.activeLayerKey = 'A';
         this.zoom = 1.0;     // Pixels per sample
         this.offset = 0.0;   // Scroll offset in pixels
@@ -205,7 +205,7 @@ class WebGLWaveform {
      * @param {string} layerKey Active layer ('A' or 'B')
      */
     setActiveLayer(layerKey) {
-        if (layerKey !== 'A' && layerKey !== 'B') return;
+        if (layerKey !== 'A' && layerKey !== 'B' && layerKey !== 'C') return;
         this.activeLayerKey = layerKey;
         this.render();
     }
@@ -215,7 +215,7 @@ class WebGLWaveform {
      */
     clear() {
         const gl = this.gl;
-        ['A', 'B'].forEach(layerKey => {
+        ['A', 'B', 'C'].forEach(layerKey => {
             if (this.lods[layerKey]) {
                 this.lods[layerKey].forEach(lod => {
                     if (lod.ampBuf) gl.deleteBuffer(lod.ampBuf);
