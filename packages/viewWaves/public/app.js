@@ -55,6 +55,7 @@ if (syncButton) {
 const tracks = {};
 
 let isSongPlaying = false;
+let selectedSceneIndex = -1;
 
 // ==========================================
 // 純粋関数群 (Pure Functions)
@@ -231,13 +232,49 @@ function updateNextReadyUI(trackId) {
     const t = tracks[trackId];
     if (!t || !t.nextReadyBadge) return;
     
-    const inactiveKey = t.activeLayerKey === 'A' ? 'B' : 'A';
-    const isNextReady = t.layers[inactiveKey].isReady && t.layers[inactiveKey].url !== null;
+    const nextSlot = t.currentSceneIndex + 1;
+    let isNextReady = false;
+    
+    Object.keys(t.layers).forEach(key => {
+        if (key !== t.activeLayerKey) {
+            const layer = t.layers[key];
+            if (layer.slotIndex === nextSlot && layer.isReady) {
+                isNextReady = true;
+            }
+        }
+    });
     
     if (isNextReady) {
         t.nextReadyBadge.classList.add('visible');
     } else {
         t.nextReadyBadge.classList.remove('visible');
+    }
+}
+
+function updatePreLoadBadgeUI(trackId) {
+    const t = tracks[trackId];
+    if (!t || !t.preLoadBadge) return;
+    
+    if (selectedSceneIndex < 0 || t.currentSceneIndex === selectedSceneIndex) {
+        t.preLoadBadge.classList.remove('visible');
+        return;
+    }
+    
+    let isPreLoaded = false;
+    
+    Object.keys(t.layers).forEach(key => {
+        if (key !== t.activeLayerKey) {
+            const layer = t.layers[key];
+            if (layer.slotIndex === selectedSceneIndex && layer.isReady) {
+                isPreLoaded = true;
+            }
+        }
+    });
+    
+    if (isPreLoaded) {
+        t.preLoadBadge.classList.add('visible');
+    } else {
+        t.preLoadBadge.classList.remove('visible');
     }
 }
 
@@ -440,6 +477,10 @@ function getOrCreateTrackUI(trackId) {
     wsLayerB.className = 'ws-layer inactive';
     wsLayerB.id = `ws-layer-b-${trackId}`;
     
+    const wsLayerC = document.createElement('div');
+    wsLayerC.className = 'ws-layer inactive';
+    wsLayerC.id = `ws-layer-c-${trackId}`;
+    
     // WebGL表示用レイヤー
     const webglCanvas = document.createElement('canvas');
     webglCanvas.className = 'webgl-layer';
@@ -463,20 +504,31 @@ function getOrCreateTrackUI(trackId) {
     const footerRow = document.createElement('div');
     footerRow.className = 'footer-row';
     
+    const badgesWrapper = document.createElement('div');
+    badgesWrapper.className = 'badges-wrapper';
+    
     const nextReadyBadge = document.createElement('div');
     nextReadyBadge.className = 'next-ready-badge';
     nextReadyBadge.textContent = 'NEXT READY';
+    
+    const preLoadBadge = document.createElement('div');
+    preLoadBadge.className = 'pre-load-badge';
+    preLoadBadge.textContent = 'PRE LOAD';
+    
+    badgesWrapper.appendChild(nextReadyBadge);
+    badgesWrapper.appendChild(preLoadBadge);
     
     const timeDisplay = document.createElement('div');
     timeDisplay.className = 'time-display';
     timeDisplay.id = `time-${trackId}`;
     timeDisplay.textContent = '00:00 / -00:00';
     
-    footerRow.appendChild(nextReadyBadge);
+    footerRow.appendChild(badgesWrapper);
     footerRow.appendChild(timeDisplay);
     
     waveContainer.appendChild(wsLayerA);
     waveContainer.appendChild(wsLayerB);
+    waveContainer.appendChild(wsLayerC);
     waveContainer.appendChild(webglCanvas);
     waveContainer.appendChild(overlayLeft);
     waveContainer.appendChild(overlayRight);
@@ -500,6 +552,7 @@ function getOrCreateTrackUI(trackId) {
 
     const wsA = WaveSurfer.create({ container: `#ws-layer-a-${trackId}`, ...wsOptions });
     const wsB = WaveSurfer.create({ container: `#ws-layer-b-${trackId}`, ...wsOptions });
+    const wsC = WaveSurfer.create({ container: `#ws-layer-c-${trackId}`, ...wsOptions });
 
     const webglWaveform = new WebGLWaveform(webglCanvas, { color: [1.0, 0.596, 0.0, 1.0] });
 
@@ -518,23 +571,27 @@ function getOrCreateTrackUI(trackId) {
             webglWaveform.setView(pxPerSec, wsB.renderer.scrollContainer.scrollLeft);
         }
     });
+    wsC.on('scroll', () => {
+        updateOverlayUI(trackId);
+        if (tracks[trackId].activeLayerKey === 'C') {
+            const pxPerSec = currentZoom === 0 ? (wsC.renderer.scrollContainer.clientWidth / wsC.getDuration()) : currentZoom;
+            webglWaveform.setView(pxPerSec, wsC.renderer.scrollContainer.scrollLeft);
+        }
+    });
 
     // WaveSurfer標準のジャンプスクロールを無効化（自前で滑らかに制御するため）
     wsA.renderer.scrollIntoView = () => {};
     wsB.renderer.scrollIntoView = () => {};
-
-    // WaveSurfer V7の reRender() は内部で「プレイヘッドの画面上のピクセル位置が
-    // ズーム前後で動かないように scrollLeft を自動補正する」ハードコーディングされた処理を持つ。
-    // zoom() は内部で reRender() を呼ぶため、zoom()呼び出し後に setScroll() で
-    // マウス位置へスクロールしても、次の zoom() 呼び出しで再びプレイヘッドに戻されてしまう。
-    // この問題を解決するため、reRender のスクロール補正部分だけをスキップするフラグ付きパッチを当てる。
+    
     patchReRenderForZoom(wsA);
     patchReRenderForZoom(wsB);
+    patchReRenderForZoom(wsC);
 
     tracks[trackId] = {
         layers: {
-            A: { ws: wsA, el: wsLayerA, url: null, isReady: false },
-            B: { ws: wsB, el: wsLayerB, url: null, isReady: false }
+            A: { ws: wsA, el: wsLayerA, url: null, slotIndex: -1, isReady: false },
+            B: { ws: wsB, el: wsLayerB, url: null, slotIndex: -1, isReady: false },
+            C: { ws: wsC, el: wsLayerC, url: null, slotIndex: -1, isReady: false }
         },
         webglWaveform: webglWaveform,
         activeLayerKey: 'A',
@@ -548,6 +605,7 @@ function getOrCreateTrackUI(trackId) {
         boxEl: box,
         timeEl: timeDisplay,
         nextReadyBadge: nextReadyBadge,
+        preLoadBadge: preLoadBadge,
         currentSceneIndex: -1,
         fileName: null,
         sceneName: null,
@@ -618,6 +676,32 @@ function getOrCreateTrackUI(trackId) {
     wsA.on('ready', onReadyA);
     wsB.on('ready', onReadyB);
 
+    const onReadyC = () => {
+        tracks[trackId].layers.C.isReady = true;
+        webglWaveform.resize();
+        
+        const decoded = wsC.getDecodedData();
+        if (decoded) {
+            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'C');
+        }
+        
+        if (currentZoom !== 0) {
+            tracks[trackId].layers.C.ws.zoom(currentZoom);
+        }
+        
+        if (tracks[trackId].activeLayerKey === 'C') {
+            const scrollContainer = wsC.renderer.scrollContainer;
+            const pxPerSec = currentZoom === 0 ? (scrollContainer.clientWidth / wsC.getDuration()) : currentZoom;
+            webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
+        }
+        
+        updateTrackMarkers(tracks[trackId]);
+        updatePreLoadBadgeUI(trackId);
+        sortVisibleTracks();
+    };
+    
+    wsC.on('ready', onReadyC);
+
     return tracks[trackId];
 }
 
@@ -673,30 +757,39 @@ socket.on('clip_playing', (data) => {
     
     // すでにアクティブなレイヤーで読み込み済みの場合は何もしない
     if (t.layers[t.activeLayerKey].url === url) {
+        t.layers[t.activeLayerKey].slotIndex = slotIndex;
+        updateNextReadyUI(trackId);
+        updatePreLoadBadgeUI(trackId);
         return;
     }
     
-    const inactiveKey = t.activeLayerKey === 'A' ? 'B' : 'A';
+    // アクティブ以外のレイヤーの中に、すでにその URL がプリロードされているか探す
+    let swapTargetKey = null;
+    Object.keys(t.layers).forEach(key => {
+        if (key !== t.activeLayerKey && t.layers[key].url === url) {
+            swapTargetKey = key;
+        }
+    });
     
-    // もし非アクティブなレイヤー（裏側）にプリロードされていれば、瞬時にスワップ（切り替え）する
-    if (t.layers[inactiveKey].url === url) {
+    if (swapTargetKey) {
         const activeLayer = t.layers[t.activeLayerKey];
-        const inactiveLayer = t.layers[inactiveKey];
+        const targetLayer = t.layers[swapTargetKey];
         
         // クラスを切り替えてフェードアニメーションを発動
         activeLayer.el.classList.remove('active');
         activeLayer.el.classList.add('inactive');
         
-        inactiveLayer.el.classList.remove('inactive');
-        inactiveLayer.el.classList.add('active');
+        targetLayer.el.classList.remove('inactive');
+        targetLayer.el.classList.add('active');
         
-        t.activeLayerKey = inactiveKey;
+        t.activeLayerKey = swapTargetKey;
+        t.layers[swapTargetKey].slotIndex = slotIndex;
         
         // 新しくアクティブになった WaveSurfer に現在のズーム倍率を適用
         if (t.ws && t.ws.getDecodedData()) {
             t.ws.zoom(currentZoom === 0 ? false : currentZoom);
             // WebGL側は事前に転送（プリレンダリング）が完了しているため、アクティブレイヤーをスワップするだけで完了
-            t.webglWaveform.setActiveLayer(inactiveKey);
+            t.webglWaveform.setActiveLayer(swapTargetKey);
             
             // スワップ直後に最新のズームとスクロール位置をWebGLに同期する
             const scrollContainer = t.ws.renderer.scrollContainer;
@@ -706,23 +799,28 @@ socket.on('clip_playing', (data) => {
         
         // スワップされた（元アクティブだった）レイヤーをリセットする
         activeLayer.url = null;
+        activeLayer.slotIndex = -1;
         activeLayer.isReady = false;
         activeLayer.ws.empty();
         
         updateNextReadyUI(trackId);
+        updatePreLoadBadgeUI(trackId);
         
-        console.log(`[Swap] Track ${trackId + 1} instantly switched to preloaded layer ${inactiveKey}`);
+        console.log(`[Swap] Track ${trackId + 1} instantly switched to preloaded layer ${swapTargetKey}`);
     } else {
         // プリロードされていなければ、従来通りアクティブなレイヤーにロードする
         console.log(`[Load] Loading audio for Track ${trackId + 1}: ${url}`);
-        t.layers[t.activeLayerKey].url = url;
-        t.layers[t.activeLayerKey].isReady = false;
+        const activeLayer = t.layers[t.activeLayerKey];
+        activeLayer.url = url;
+        activeLayer.slotIndex = slotIndex;
+        activeLayer.isReady = false;
         
         // 新規ロード時には、現在のアクティブレイヤーを描画対象として設定しておく
         t.webglWaveform.setActiveLayer(t.activeLayerKey);
         
         updateNextReadyUI(trackId);
-        t.layers[t.activeLayerKey].ws.load(url).catch(err => {
+        updatePreLoadBadgeUI(trackId);
+        activeLayer.ws.load(url).catch(err => {
             if (err.name !== 'AbortError') console.error('WaveSurfer load error:', err);
         });
     }
@@ -736,17 +834,20 @@ socket.on('clip_stopped', (data) => {
         t.currentSceneIndex = -1;
         t.fileName = null;
         t.sceneName = null;
-        t.layers['A'].url = null;
-        t.layers['B'].url = null;
-        t.layers['A'].isReady = false;
-        t.layers['B'].isReady = false;
-        t.layers['A'].ws.empty();
-        t.layers['B'].ws.empty();
+        
+        Object.keys(t.layers).forEach(key => {
+            const layer = t.layers[key];
+            layer.url = null;
+            layer.slotIndex = -1;
+            layer.isReady = false;
+            layer.ws.empty();
+        });
         
         // WebGLバッファメモリを解放して描画をクリア
         t.webglWaveform.clear();
         
         updateNextReadyUI(trackId);
+        updatePreLoadBadgeUI(trackId);
         updateTrackTitle(trackId);
         
         // アニメーションを停止し、変数をリセット
@@ -917,29 +1018,119 @@ socket.on('track_name', (data) => {
     updateTrackTitle(trackId);
 });
 
+socket.on('selected_scene_changed', (data) => {
+    selectedSceneIndex = data.sceneIndex;
+    Object.keys(tracks).forEach(trackId => {
+        updatePreLoadBadgeUI(trackId);
+    });
+});
+
 // 次のシーンの音声ファイルを裏でダウンロード（キャッシュ）しておく処理
 socket.on('clip_preload', (data) => {
-    const { trackId, filePath } = data;
+    const { trackId, slotIndex, filePath } = data;
     const url = `/audio?path=${encodeURIComponent(filePath)}`;
     
     const t = getOrCreateTrackUI(trackId);
     
-    // すでにアクティブなレイヤーで読み込まれていれば無視
-    if (t.layers[t.activeLayerKey].url === url) return;
+    // すでにいずれかのレイヤーで読み込まれているかチェック
+    let exists = false;
+    Object.keys(t.layers).forEach(key => {
+        if (t.layers[key].url === url) {
+            t.layers[key].slotIndex = slotIndex;
+            exists = true;
+        }
+    });
+    if (exists) {
+        updateNextReadyUI(trackId);
+        return;
+    }
     
-    const inactiveKey = t.activeLayerKey === 'A' ? 'B' : 'A';
-    const inactiveLayer = t.layers[inactiveKey];
+    const inactiveKeys = Object.keys(t.layers).filter(key => key !== t.activeLayerKey);
+    let targetKey = inactiveKeys.find(key => t.layers[key].url === null);
     
-    // すでに非アクティブレイヤーで読み込まれていれば無視
-    if (inactiveLayer.url === url) return;
+    if (!targetKey) {
+        targetKey = inactiveKeys.find(key => t.layers[key].slotIndex !== selectedSceneIndex);
+    }
+    if (!targetKey) {
+        targetKey = inactiveKeys[0];
+    }
     
-    console.log(`[Preload] Decoding audio in background layer ${inactiveKey} for Track ${trackId + 1}: ${url}`);
-    inactiveLayer.url = url;
-    inactiveLayer.isReady = false;
+    console.log(`[Preload] Decoding NEXT READY audio in background layer ${targetKey} for Track ${trackId + 1}: ${url}`);
+    const layer = t.layers[targetKey];
+    layer.url = url;
+    layer.slotIndex = slotIndex;
+    layer.isReady = false;
+    
     updateNextReadyUI(trackId);
-    inactiveLayer.ws.load(url).catch(err => {
+    updatePreLoadBadgeUI(trackId);
+    
+    layer.ws.load(url).catch(err => {
         if (err.name !== 'AbortError') console.error('Preload WaveSurfer load error:', err);
     });
+});
+
+socket.on('clip_selected_preload', (data) => {
+    const { trackId, slotIndex, filePath } = data;
+    
+    if (selectedSceneIndex !== slotIndex) return;
+    
+    const url = `/audio?path=${encodeURIComponent(filePath)}`;
+    const t = getOrCreateTrackUI(trackId);
+    
+    let exists = false;
+    Object.keys(t.layers).forEach(key => {
+        if (t.layers[key].url === url) {
+            t.layers[key].slotIndex = slotIndex;
+            exists = true;
+        }
+    });
+    if (exists) {
+        updatePreLoadBadgeUI(trackId);
+        return;
+    }
+    
+    const nextSlot = t.currentSceneIndex + 1;
+    const inactiveKeys = Object.keys(t.layers).filter(key => key !== t.activeLayerKey);
+    
+    let targetKey = inactiveKeys.find(key => t.layers[key].url === null);
+    if (!targetKey) {
+        targetKey = inactiveKeys.find(key => t.layers[key].slotIndex !== nextSlot);
+    }
+    if (!targetKey) {
+        targetKey = inactiveKeys[0];
+    }
+    
+    console.log(`[Preload] Decoding SELECTED PRE LOAD audio in background layer ${targetKey} for Track ${trackId + 1}: ${url}`);
+    const layer = t.layers[targetKey];
+    layer.url = url;
+    layer.slotIndex = slotIndex;
+    layer.isReady = false;
+    
+    updatePreLoadBadgeUI(trackId);
+    updateNextReadyUI(trackId);
+    
+    layer.ws.load(url).catch(err => {
+        if (err.name !== 'AbortError') console.error('Selected preload WaveSurfer load error:', err);
+    });
+});
+
+socket.on('clip_selected_preload_empty', (data) => {
+    const { trackId, slotIndex } = data;
+    if (selectedSceneIndex !== slotIndex) return;
+    
+    const t = getOrCreateTrackUI(trackId);
+    
+    Object.keys(t.layers).forEach(key => {
+        if (key !== t.activeLayerKey && t.layers[key].slotIndex === slotIndex) {
+            const layer = t.layers[key];
+            layer.url = null;
+            layer.slotIndex = -1;
+            layer.isReady = false;
+            layer.ws.empty();
+        }
+    });
+    
+    updatePreLoadBadgeUI(trackId);
 });
 
 // マーカー情報を受信したときの処理
