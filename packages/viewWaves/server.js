@@ -170,8 +170,14 @@ setInterval(() => {
         if (abletonConnected) {
             abletonConnected = false;
             numTracks = 0; // 接続復帰時にトラック情報が再読み込みされるようリセット
+            
+            // 接続復帰時に重複ガードを回避し、波形を即座に再ロードさせるためキャッシュをクリア
+            for (const key in playingSlots) delete playingSlots[key];
+            for (const key in activeClips) delete activeClips[key];
+            clipLengths = {};
+            
             io.emit('ableton_status', { connected: false });
-            console.log('[Live] Ableton Liveとの通信がタイムアウトしました。疎通待ちに移行します。');
+            console.log('[Live] Ableton Liveとの通信がタイムアウトしました。状態キャッシュをクリアし、疎通待ちに移行します。');
         }
     }
     
