@@ -10,12 +10,17 @@
       "name": "osc-router",
       "dir": "packages/osc-router",
       "type": "node",
-      "startCmd": "index.js"
+      "startCmd": "index.js",
+      "host": "127.0.0.1",
+      "listenPort": 11001
     },
     {
       "name": "viewWaves",
       "dir": "packages/viewWaves",
       "type": "neutralino",
+      "httpPort": 3000,
+      "oscPort": 11002,
+      "pollInterval": 500,
       "dependencies": ["osc-router"]
     },
     {
@@ -23,7 +28,10 @@
       "dir": "packages/DaihonTrigger",
       "type": "node",
       "startCmd": "server.js",
-      "port": 3001,
+      "httpPort": 3001,
+      "oscPort": 11003,
+      "oscConcurrencyLimit": 50,
+      "oscTimeout": 1000,
       "dependencies": ["osc-router"]
     },
     {
@@ -31,27 +39,9 @@
       "dir": "packages/OscTester",
       "type": "node",
       "startCmd": "server.js",
-      "port": 3010,
+      "httpPort": 3010,
+      "oscPort": 11004,
       "dependencies": ["osc-router"]
     }
-  ],
-  "oscRouter": {
-    "host": "127.0.0.1",
-    "listenPort": 11001
-  },
-  "viewWaves": {
-    "httpPort": 3000,
-    "oscPort": 11002,
-    "pollInterval": 500
-  },
-  "daihonTrigger": {
-    "httpPort": 3001,
-    "oscPort": 11003,
-    "oscConcurrencyLimit": 50,
-    "oscTimeout": 1000
-  },
-  "oscTester": {
-    "httpPort": 3010,
-    "oscPort": 11004
-  }
+  ]
 }
