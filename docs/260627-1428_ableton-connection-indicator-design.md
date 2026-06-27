@@ -50,11 +50,24 @@
   - `document.body.className = 'status-disconnected';`
 
 ### 2.4 スタイルの変更 (`packages/viewWaves/public/style.css`)
-- 枠線色の割り当てを変更します。
-  - `body.status-waiting` の色をオレンジに変更：
+- 枠線色の割り当てとアニメーションを変更します。
+  - `body.status-waiting` の色をオレンジに変更し、ゆっくりとした明滅アニメーション（2秒周期）を追加：
     ```css
     body.status-waiting {
         border-color: #ff9800; /* Orange: Connected to Server, Waiting for Ableton */
+        animation: pulse-orange 2.0s infinite ease-in-out;
+    }
+
+    @keyframes pulse-orange {
+        0% {
+            border-color: #ff9800;
+        }
+        50% {
+            border-color: rgba(255, 152, 0, 0.2);
+        }
+        100% {
+            border-color: #ff9800;
+        }
     }
     ```
   - 新たに `body.status-connected` を定義し、緑に設定：

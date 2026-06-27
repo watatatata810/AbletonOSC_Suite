@@ -45,6 +45,7 @@
   /* 変更後 */
   body.status-waiting {
       border-color: #ff9800; /* Orange: Connected to Server, Waiting for Ableton */
+      animation: pulse-orange 2.0s infinite ease-in-out;
   }
   
   body.status-connected {
