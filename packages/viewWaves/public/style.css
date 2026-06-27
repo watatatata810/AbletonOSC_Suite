@@ -28,11 +28,15 @@ body {
 
 /* Status representation via borders and background */
 body.status-waiting {
-    border-color: #4caf50; /* Green: Connected & Waiting */
+    border-color: #ff9800; /* Orange: Connected to Server, Waiting for Ableton */
+}
+
+body.status-connected {
+    border-color: #4caf50; /* Green: Connected to Server & Ableton */
 }
 
 body.status-disconnected {
-    border-color: #f44336; /* Red: Disconnected */
+    border-color: #f44336; /* Red: Disconnected from Server */
     background-color: #2a1111;
 }
 
