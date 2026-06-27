@@ -429,7 +429,6 @@ socket.on('ableton_status', (data) => {
         document.body.className = 'status-connected'; // Ableton疎通時は緑枠
     } else {
         document.body.className = 'status-waiting'; // 疎通待ち時はオレンジ枠
-        resetAllTracksUI(); // 画面をクリーンアップ
     }
 });
 
