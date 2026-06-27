@@ -159,7 +159,19 @@ let serverIsPlaying = false;
 let selectedSceneIndex = -1;
 let selectedSceneTimer = null;
 
-// デバッグ用変数
+// デバッグ用ファイル書き出し定義
+const logFilePath = path.join(__dirname, 'server.log');
+try {
+    fs.writeFileSync(logFilePath, `Server Debug Log Started\n`);
+} catch (e) {}
+
+function debugLog(msg) {
+    console.log(msg);
+    try {
+        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] ${msg}\n`);
+    } catch (e) {}
+}
+
 let debugRequestStartTime = 0;
 let debugPlayingPositionCount = 0;
 let debugLastLogTime = Date.now();
@@ -182,14 +194,14 @@ setInterval(() => {
             clipLengths = {};
             
             io.emit('ableton_status', { connected: false });
-            console.log('[Live] Ableton Liveとの通信がタイムアウトしました。状態キャッシュをクリアし、疎通待ちに移行します。');
+            debugLog('Ableton Liveとの通信がタイムアウトしました。状態キャッシュをクリアし、疎通待ちに移行します。');
         }
     }
     
     // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
     if (numTracks === 0) {
         debugRequestStartTime = Date.now();
-        console.log(`[Debug OSC] Sending /live/song/get/num_tracks at ${new Date().toISOString()}`);
+        debugLog(`Sending /live/song/get/num_tracks`);
         oscClient.send('/live/song/get/num_tracks');
     }
     
@@ -234,7 +246,7 @@ oscServer.on('message', (msg) => {
     if (!abletonConnected) {
         abletonConnected = true;
         io.emit('ableton_status', { connected: true });
-        console.log('[Live] Ableton Liveとの通信を確立しました。');
+        debugLog('Ableton Liveとの通信を確立しました。');
     }
     
     if (config.global?.debug) {
@@ -246,8 +258,8 @@ oscServer.on('message', (msg) => {
     if (address === '/live/song/get/num_tracks') {
         numTracks = args[0];
         const rtt = Date.now() - debugRequestStartTime;
-        console.log(`[Debug OSC] Received /live/song/num_tracks: ${numTracks} (RTT: ${rtt}ms) at ${new Date().toISOString()}`);
-        console.log(`[Live] Detected ${numTracks} tracks in the song. Setting up listeners...`);
+        debugLog(`Received /live/song/num_tracks: ${numTracks} (RTT: ${rtt}ms)`);
+        debugLog(`Detected ${numTracks} tracks in the song. Setting up listeners...`);
         
         // 全体の再生状態（スペースキー等）を監視開始
         oscClient.send('/live/song/start_listen/is_playing');
@@ -357,7 +369,7 @@ oscServer.on('message', (msg) => {
         debugPlayingPositionCount++;
         const now = Date.now();
         if (now - debugLastLogTime >= 1000) {
-            console.log(`[Debug OSC] Receiving /playing_position at ${debugPlayingPositionCount} pkts/sec`);
+            debugLog(`Receiving /playing_position at ${debugPlayingPositionCount} pkts/sec`);
             debugPlayingPositionCount = 0;
             debugLastLogTime = now;
         }
