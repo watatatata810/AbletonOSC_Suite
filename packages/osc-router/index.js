@@ -11,26 +11,31 @@ const DEFAULT_CONFIG = {
 
 let config = { ...DEFAULT_CONFIG };
 
-const { loadConfig } = require('../shared-utils/configLoader');
+const { loadConfig, getPackageConfig } = require('../shared-utils/configLoader');
 const configPath = path.join(__dirname, '..', '..', 'config.json');
 const parsed = loadConfig(configPath);
+const routerConfig = getPackageConfig(parsed, 'osc-router');
 
 // 各アプリケーションの OSC ポート設定を動的に収集
 const targetPorts = [];
-if (parsed.viewWaves?.oscPort) targetPorts.push(Number(parsed.viewWaves.oscPort));
-if (parsed.daihonTrigger?.oscPort) targetPorts.push(Number(parsed.daihonTrigger.oscPort));
-if (parsed.oscTester?.oscPort) targetPorts.push(Number(parsed.oscTester.oscPort));
+if (parsed.packages && Array.isArray(parsed.packages)) {
+  parsed.packages.forEach(pkg => {
+    if (pkg.name !== 'osc-router' && pkg.oscPort) {
+      targetPorts.push(Number(pkg.oscPort));
+    }
+  });
+}
 
 config = {
-  host: parsed.oscRouter?.host || DEFAULT_CONFIG.host,
-  listenPort: parsed.oscRouter?.listenPort !== undefined ? Number(parsed.oscRouter.listenPort) : DEFAULT_CONFIG.listenPort,
+  host: routerConfig.host || DEFAULT_CONFIG.host,
+  listenPort: routerConfig.listenPort !== undefined ? Number(routerConfig.listenPort) : DEFAULT_CONFIG.listenPort,
   targetPorts: targetPorts.length > 0 ? targetPorts : DEFAULT_CONFIG.targetPorts
 };
 
 const LISTEN_PORT = config.listenPort;
 const HOST = config.host;
 
-// 転送先（デフォルト: 波形ビューアーアプリ: 11002, 台本トリガーアプリ: 11003）
+// 転送先
 const TARGET_PORTS = config.targetPorts;
 
 const server = dgram.createSocket('udp4');
