@@ -34,8 +34,18 @@ process.on('uncaughtException', (err) => {
     if (err.code === 'EPIPE') {
         process.exit(0); // 親プロセス終了によるパイプ切断時は正常終了
     }
+    
+    // UDP一時エラーなどのネットワーク切断に起因する例外は無視してプロセスを維持
+    const IGNORE_ERRORS = ['ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL', 'EHOSTUNREACH'];
+    if (err.code && IGNORE_ERRORS.includes(err.code)) {
+        console.warn(`[Network Warning] Ignored temporary UDP socket exception: ${err.code} (${err.message})`);
+        return;
+    }
+    
     console.error('Uncaught Exception:', err);
-    fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] Uncaught Exception: ${err.stack}\n`);
+    try {
+        fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] Uncaught Exception: ${err.stack}\n`);
+    } catch (e) {}
     process.exit(1);
 });
 process.on('unhandledRejection', (reason, promise) => {
@@ -120,6 +130,25 @@ app.get('/debug/clip', (req, res) => {
 const oscClient = new Client(clientHost, clientPort);
 const oscServer = new OscServer(serverPort, clientHost, () => {
     console.log(`[OSC] Listening for AbletonOSC messages on port ${serverPort}`);
+});
+
+// エラーハンドラを追加してプロセス終了を防ぐ
+oscClient.on('error', (err) => {
+    const IGNORE_ERRORS = ['ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL', 'EHOSTUNREACH'];
+    if (err.code && IGNORE_ERRORS.includes(err.code)) {
+        console.warn(`[OSC Client Warning] Ignored temporary UDP error: ${err.message}`);
+    } else {
+        console.error('[OSC Client Error]', err);
+    }
+});
+
+oscServer.on('error', (err) => {
+    const IGNORE_ERRORS = ['ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL', 'EHOSTUNREACH'];
+    if (err.code && IGNORE_ERRORS.includes(err.code)) {
+        console.warn(`[OSC Server Warning] Ignored temporary UDP error: ${err.message}`);
+    } else {
+        console.error('[OSC Server Error]', err);
+    }
 });
 
 let numTracks = 0;
