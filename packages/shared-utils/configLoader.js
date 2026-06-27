@@ -21,6 +21,30 @@ const loadConfig = (configPath) => {
     return {};
 };
 
+/**
+ * config.json から指定したパッケージの設定を取得するヘルパー。
+ * インライン（packages内の該当要素）と、下位互換性のため古い個別オブジェクトの両方をマージして返します。
+ * @param {Object} config - loadConfig でロードされた設定オブジェクト
+ * @param {string} pkgName - 取得したいパッケージ名 (例: 'viewWaves')
+ * @returns {Object} パッケージ固有の設定
+ */
+const getPackageConfig = (config, pkgName) => {
+    if (!config) return {};
+    const pkg = (config.packages || []).find(p => p.name === pkgName) || {};
+    
+    // 後方互換性：古い個別オブジェクトが存在する場合はマージする
+    const legacyKey = Object.keys(config).find(
+        key => key.toLowerCase() === pkgName.toLowerCase() && key !== 'packages' && key !== 'global'
+    );
+    const legacyConfig = legacyKey ? config[legacyKey] : {};
+
+    return {
+        ...legacyConfig,
+        ...pkg
+    };
+};
+
 module.exports = {
-    loadConfig
+    loadConfig,
+    getPackageConfig
 };
