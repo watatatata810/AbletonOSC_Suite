@@ -176,6 +176,10 @@ let debugRequestStartTime = 0;
 let debugPlayingPositionCount = 0;
 let debugLastLogTime = Date.now();
 
+// OSC 輻輳制御用変数
+let lastNumTracksRequestTime = 0;
+const lastClipPositionEmitTime = {}; // key: trackId, value: timestamp
+
 // ポーリング処理：0.5秒に1回実行されるが、マーカー情報は2秒に1回に間引く
 let pollCounter = 0;
 const POLL_INTERVAL = config.viewWaves?.pollInterval ?? 500;
@@ -200,9 +204,14 @@ setInterval(() => {
     
     // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
     if (numTracks === 0) {
-        debugRequestStartTime = Date.now();
-        debugLog(`Sending /live/song/get/num_tracks`);
-        oscClient.send('/live/song/get/num_tracks');
+        const now = Date.now();
+        // 前回の送信から2.0秒以上経過している場合のみ送信（再送スパム防止）
+        if (now - lastNumTracksRequestTime > 2000) {
+            lastNumTracksRequestTime = now;
+            debugRequestStartTime = now;
+            debugLog(`Sending /live/song/get/num_tracks`);
+            oscClient.send('/live/song/get/num_tracks');
+        }
     }
     
     // playing_slot_indexのロス対策: numTracksがあるのに値が取得できていないトラックがあれば再取得
@@ -256,8 +265,17 @@ oscServer.on('message', (msg) => {
     const args = msg.slice(1);
 
     if (address === '/live/song/get/num_tracks') {
-        numTracks = args[0];
+        const val = args[0];
         const rtt = Date.now() - debugRequestStartTime;
+        
+        // すでにトラック数が確定している場合は、重複してリスナー登録を送らない（バーストガード）
+        if (numTracks > 0) {
+            numTracks = val; // 値だけ更新
+            debugLog(`Received redundant /live/song/num_tracks: ${val} (Skipped listener setup)`);
+            return;
+        }
+        
+        numTracks = val;
         debugLog(`Received /live/song/num_tracks: ${numTracks} (RTT: ${rtt}ms)`);
         debugLog(`Detected ${numTracks} tracks in the song. Setting up listeners...`);
         
@@ -376,12 +394,19 @@ oscServer.on('message', (msg) => {
 
         const length = clipLengths[`${trackId}_${slotIndex}`];
         if (length && length > 0) {
-            io.emit('clip_position', {
-                trackId: trackId,
-                slotIndex: slotIndex,
-                progress: Math.min(Math.max(position / length, 0), 1),
-                position: position
-            });
+            const now = Date.now();
+            const lastEmit = lastClipPositionEmitTime[trackId] || 0;
+            
+            // 100ms（10Hz）間隔に間引いてブラウザにWebSocket送信
+            if (now - lastEmit >= 100) {
+                io.emit('clip_position', {
+                    trackId: trackId,
+                    slotIndex: slotIndex,
+                    progress: Math.min(Math.max(position / length, 0), 1),
+                    position: position
+                });
+                lastClipPositionEmitTime[trackId] = now;
+            }
         }
     }
     else if (address === '/live/song/get/tempo') {
