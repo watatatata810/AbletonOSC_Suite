@@ -172,6 +172,22 @@ function debugLog(msg) {
     } catch (e) {}
 }
 
+function syncActiveClipsToClients() {
+    debugLog(`[Sync] Syncing current state cache to clients...`);
+    for (const trackId in activeClips) {
+        const slotIndex = activeClips[trackId];
+        const filePath = clipLengths[`${trackId}_${slotIndex}_file_path`];
+        if (filePath && filePath !== "NO_AUDIO") {
+            io.emit('clip_playing', {
+                trackId: parseInt(trackId),
+                slotIndex: slotIndex,
+                filePath: filePath
+            });
+            emitMarkersIfReady(parseInt(trackId), slotIndex);
+        }
+    }
+}
+
 let debugRequestStartTime = 0;
 let debugPlayingPositionCount = 0;
 let debugLastLogTime = Date.now();
@@ -192,13 +208,9 @@ setInterval(() => {
             abletonConnected = false;
             numTracks = 0; // 接続復帰時にトラック情報が再読み込みされるようリセット
             
-            // 接続復帰時に重複ガードを回避し、波形を即座に再ロードさせるためキャッシュをクリア
-            for (const key in playingSlots) delete playingSlots[key];
-            for (const key in activeClips) delete activeClips[key];
-            clipLengths = {};
-            
+            // 【変更】一時的な通信遮断ではキャッシュを消さず維持（Abletonへの再問い合わせの遅延を回避するため）
             io.emit('ableton_status', { connected: false });
-            debugLog('Ableton Liveとの通信がタイムアウトしました。状態キャッシュをクリアし、疎通待ちに移行します。');
+            debugLog('Ableton Liveとの通信がタイムアウトしました。疎通待ちに移行します。');
         }
     }
     
@@ -256,6 +268,9 @@ oscServer.on('message', (msg) => {
         abletonConnected = true;
         io.emit('ableton_status', { connected: true });
         debugLog('Ableton Liveとの通信を確立しました。');
+        
+        // 【変更】疎通が復活した瞬間に、現在の状態キャッシュをブラウザに再同期する
+        syncActiveClipsToClients();
     }
     
     if (config.global?.debug) {
