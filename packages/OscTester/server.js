@@ -10,15 +10,16 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // ======= 設定 =======
-const { loadConfig } = require('../shared-utils/configLoader');
+const { loadConfig, getPackageConfig } = require('../shared-utils/configLoader');
 const configPath = path.join(__dirname, '..', '..', 'config.json');
 const config = loadConfig(configPath);
+const pkgConfig = getPackageConfig(config, 'OscTester');
 
-const HTTP_PORT = config.oscTester?.httpPort ?? 3010;
+const HTTP_PORT = pkgConfig.httpPort ?? 3010;
 const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
 const ABLETON_OSC_HOST = config.global?.abletonHost ?? '127.0.0.1';
 const ABLETON_OSC_PORT = config.global?.abletonPort ?? 11000;
-const NODE_OSC_PORT = config.oscTester?.oscPort ?? 11004;
+const NODE_OSC_PORT = pkgConfig.oscPort ?? 11004;
 
 // 静的ファイルの配信
 app.use(express.static(path.join(__dirname, 'public')));

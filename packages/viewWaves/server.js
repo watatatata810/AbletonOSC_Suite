@@ -10,13 +10,14 @@ app.set('json spaces', 2); // JSON出力のプリティプリントをデフォ�
 const server = http.createServer(app);
 const io = new Server(server);
 
-const { loadConfig } = require('../shared-utils/configLoader');
+const { loadConfig, getPackageConfig } = require('../shared-utils/configLoader');
 const configPath = path.join(__dirname, '..', '..', 'config.json');
 const config = loadConfig(configPath);
+const pkgConfig = getPackageConfig(config, 'viewWaves');
 
 const clientHost = config.global?.abletonHost ?? '127.0.0.1';
 const clientPort = config.global?.abletonPort ?? (process.env.ABLETON_PORT || 11000);
-const serverPort = config.viewWaves?.oscPort ?? (process.env.OSC_PORT || 11002);
+const serverPort = pkgConfig.oscPort ?? (process.env.OSC_PORT || 11002);
 
 // 現在再生中のクリップを管理（TrackID -> SlotIndex）
 const activeClips = {};
@@ -48,7 +49,7 @@ process.stderr.on('error', (err) => {
     if (err.code === 'EPIPE') process.exit(0);
 });
 
-const WEB_PORT = config.viewWaves?.httpPort ?? (process.env.PORT || 3000);
+const WEB_PORT = pkgConfig.httpPort ?? (process.env.PORT || 3000);
 const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
 
 // CORS設定：Neutralinojsの待機画面からのアクセスを許可するため、一番最初に定義する

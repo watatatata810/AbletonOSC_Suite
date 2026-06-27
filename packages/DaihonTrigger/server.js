@@ -14,22 +14,23 @@ const io = new Server(server);
 const DATA_FILE = path.join(__dirname, 'project_data.json');
 
 // ======= 設定 =======
-const { loadConfig } = require('../shared-utils/configLoader');
+const { loadConfig, getPackageConfig } = require('../shared-utils/configLoader');
 const configPath = path.join(__dirname, '..', '..', 'config.json');
 const config = loadConfig(configPath);
+const pkgConfig = getPackageConfig(config, 'DaihonTrigger');
 
-const HTTP_PORT = config.daihonTrigger?.httpPort ?? (process.env.PORT || 3001); 
+const HTTP_PORT = pkgConfig.httpPort ?? (process.env.PORT || 3001); 
 const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
 // AbletonOSCが待ち受けるポート（Ableton Live側で設定されている受信ポート）
 const ABLETON_OSC_HOST = config.global?.abletonHost ?? '127.0.0.1';
 const ABLETON_OSC_PORT = config.global?.abletonPort ?? (process.env.ABLETON_PORT || 11000); 
 
 // 同時実行数制限とタイムアウト設定 (環境変数)
-const OSC_CONCURRENCY_LIMIT = config.daihonTrigger?.oscConcurrencyLimit ?? (parseInt(process.env.OSC_CONCURRENCY_LIMIT, 10) || 20);
-const OSC_TIMEOUT = config.daihonTrigger?.oscTimeout ?? (parseInt(process.env.OSC_TIMEOUT, 10) || 1000);
+const OSC_CONCURRENCY_LIMIT = pkgConfig.oscConcurrencyLimit ?? (parseInt(process.env.OSC_CONCURRENCY_LIMIT, 10) || 20);
+const OSC_TIMEOUT = pkgConfig.oscTimeout ?? (parseInt(process.env.OSC_TIMEOUT, 10) || 1000);
 
 // Node.jsがAbletonOSCからのメッセージを受け取るためのポート
-const NODE_OSC_PORT = config.daihonTrigger?.oscPort ?? (process.env.OSC_PORT || 11001);
+const NODE_OSC_PORT = pkgConfig.oscPort ?? (process.env.OSC_PORT || 11003);
 const oscServer = new OscServer(NODE_OSC_PORT, '0.0.0.0');
 // 並行取得時のリスナー警告を回避するため、同時実行数に応じた上限を設定
 oscServer.setMaxListeners(OSC_CONCURRENCY_LIMIT + 10);
