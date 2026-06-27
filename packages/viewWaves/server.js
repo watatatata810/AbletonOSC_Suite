@@ -159,6 +159,11 @@ let serverIsPlaying = false;
 let selectedSceneIndex = -1;
 let selectedSceneTimer = null;
 
+// デバッグ用変数
+let debugRequestStartTime = 0;
+let debugPlayingPositionCount = 0;
+let debugLastLogTime = Date.now();
+
 // ポーリング処理：0.5秒に1回実行されるが、マーカー情報は2秒に1回に間引く
 let pollCounter = 0;
 const POLL_INTERVAL = config.viewWaves?.pollInterval ?? 500;
@@ -183,6 +188,8 @@ setInterval(() => {
     
     // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
     if (numTracks === 0) {
+        debugRequestStartTime = Date.now();
+        console.log(`[Debug OSC] Sending /live/song/get/num_tracks at ${new Date().toISOString()}`);
         oscClient.send('/live/song/get/num_tracks');
     }
     
@@ -238,6 +245,8 @@ oscServer.on('message', (msg) => {
 
     if (address === '/live/song/get/num_tracks') {
         numTracks = args[0];
+        const rtt = Date.now() - debugRequestStartTime;
+        console.log(`[Debug OSC] Received /live/song/num_tracks: ${numTracks} (RTT: ${rtt}ms) at ${new Date().toISOString()}`);
         console.log(`[Live] Detected ${numTracks} tracks in the song. Setting up listeners...`);
         
         // 全体の再生状態（スペースキー等）を監視開始
@@ -344,6 +353,15 @@ oscServer.on('message', (msg) => {
         const position = args[2];
         activeClips[trackId] = slotIndex; // 再生中のクリップとして登録
         
+        // 頻度デバッグ
+        debugPlayingPositionCount++;
+        const now = Date.now();
+        if (now - debugLastLogTime >= 1000) {
+            console.log(`[Debug OSC] Receiving /playing_position at ${debugPlayingPositionCount} pkts/sec`);
+            debugPlayingPositionCount = 0;
+            debugLastLogTime = now;
+        }
+
         const length = clipLengths[`${trackId}_${slotIndex}`];
         if (length && length > 0) {
             io.emit('clip_position', {
