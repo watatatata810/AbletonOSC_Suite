@@ -29,6 +29,19 @@ body {
 /* Status representation via borders and background */
 body.status-waiting {
     border-color: #ff9800; /* Orange: Connected to Server, Waiting for Ableton */
+    animation: pulse-orange 2.0s infinite ease-in-out;
+}
+
+@keyframes pulse-orange {
+    0% {
+        border-color: #ff9800;
+    }
+    50% {
+        border-color: rgba(255, 152, 0, 0.2);
+    }
+    100% {
+        border-color: #ff9800;
+    }
 }
 
 body.status-connected {
