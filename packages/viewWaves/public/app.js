@@ -390,11 +390,19 @@ function applyPendingZoom(trackId) {
 }
 
 socket.on('connect', () => {
-    document.body.className = 'status-waiting';
+    document.body.className = 'status-waiting'; // サーバー接続時はまずオレンジ枠
 });
 
 socket.on('disconnect', () => {
-    document.body.className = 'status-disconnected';
+    document.body.className = 'status-disconnected'; // サーバー切断時は赤枠
+});
+
+socket.on('ableton_status', (data) => {
+    if (data.connected) {
+        document.body.className = 'status-connected'; // Ableton疎通時は緑枠
+    } else {
+        document.body.className = 'status-waiting'; // 疎通待ち時はオレンジ枠
+    }
 });
 
 function getOrCreateTrackUI(trackId) {
