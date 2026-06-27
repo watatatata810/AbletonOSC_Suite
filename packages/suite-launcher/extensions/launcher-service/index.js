@@ -34,10 +34,10 @@ let packagesList = appConfig.packages || [];
 if (packagesList.length === 0) {
   // 互換性フォールバック用の定義
   packagesList = [
-    { name: 'osc-router', dir: 'packages/osc-router', type: 'node', startCmd: 'index.js' },
-    { name: 'viewWaves', dir: 'packages/viewWaves', type: 'neutralino' },
-    { name: 'DaihonTrigger', dir: 'packages/DaihonTrigger', type: 'node', startCmd: 'server.js', port: appConfig.daihonTrigger?.httpPort || 3001 },
-    { name: 'OscTester', dir: 'packages/OscTester', type: 'node', startCmd: 'server.js', port: appConfig.oscTester?.httpPort || 3010 }
+    { name: 'osc-router', dir: 'packages/osc-router', type: 'node', startCmd: 'index.js', listenPort: 11001 },
+    { name: 'viewWaves', dir: 'packages/viewWaves', type: 'neutralino', httpPort: 3000, oscPort: 11002 },
+    { name: 'DaihonTrigger', dir: 'packages/DaihonTrigger', type: 'node', startCmd: 'server.js', httpPort: 3001, oscPort: 11003 },
+    { name: 'OscTester', dir: 'packages/OscTester', type: 'node', startCmd: 'server.js', httpPort: 3010, oscPort: 11004 }
   ];
 }
 
@@ -84,6 +84,10 @@ async function startPackage(pkgName) {
   const pkgDir = path.join(workspaceRoot, pkg.dir);
 
   let child;
+  const env = { ...process.env };
+  if (pkg.oscPort) env.OSC_PORT = String(pkg.oscPort);
+  if (pkg.httpPort) env.PORT = String(pkg.httpPort);
+
   if (pkg.type === 'neutralino') {
     let binary = '';
     if (process.platform === 'win32') {
@@ -97,19 +101,11 @@ async function startPackage(pkgName) {
     // 診断ログ収集および環境変数の明示的伝達のため、標準入出力をパイプし、環境変数を引き渡す
     child = spawn(binaryPath, ['--load-dir-res', '--path=.'], {
       cwd: pkgDir,
-      env: { ...process.env, OSC_PORT: '11002', PORT: '3000' }
+      env: env
     });
   } else {
     const nodePath = process.execPath; // 現在実行中の node バイナリのパス
     const scriptPath = path.join(pkgDir, pkg.startCmd);
-
-    // 環境変数を引き継ぐ
-    const env = { ...process.env };
-    if (pkgName === 'viewWaves') {
-      env.OSC_PORT = '11002';
-    } else if (pkgName === 'DaihonTrigger') {
-      env.OSC_PORT = '11003';
-    }
 
     child = spawn(nodePath, [scriptPath], {
       cwd: pkgDir,
@@ -201,7 +197,7 @@ const server = http.createServer(async (req, res) => {
       localIp: getLocalIP(),
       packages: packagesList.map(pkg => ({
         name: pkg.name,
-        port: pkg.port || null,
+        port: pkg.httpPort || null,
         status: runningProcesses[pkg.name]?.status || 'stopped',
         pid: runningProcesses[pkg.name]?.pid || null
       }))
