@@ -21,6 +21,8 @@ const serverPort = pkgConfig.oscPort ?? (process.env.OSC_PORT || 11002);
 
 // 現在再生中のクリップを管理（TrackID -> SlotIndex）
 const activeClips = {};
+let abletonConnected = false;
+let lastAbletonMessageTime = 0;
 
 // 親プロセス（Neutralino）が終了した際に確実に自身も終了するフェイルセーフ
 process.stdin.on('end', () => process.exit(0));
@@ -134,6 +136,16 @@ const POLL_INTERVAL = config.viewWaves?.pollInterval ?? 500;
 setInterval(() => {
     pollCounter++;
     
+    // タイムアウト監視：最後のパケット受信から4秒以上経過していたら切断と判定
+    if (lastAbletonMessageTime > 0 && Date.now() - lastAbletonMessageTime > 4000) {
+        if (abletonConnected) {
+            abletonConnected = false;
+            numTracks = 0; // 接続復帰時にトラック情報が再読み込みされるようリセット
+            io.emit('ableton_status', { connected: false });
+            console.log('[Live] Ableton Liveとの通信がタイムアウトしました。疎通待ちに移行します。');
+        }
+    }
+    
     // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
     if (numTracks === 0) {
         oscClient.send('/live/song/get/num_tracks');
@@ -175,6 +187,14 @@ setInterval(() => {
 
 // AbletonOSCからのメッセージ受信
 oscServer.on('message', (msg) => {
+    // タイムスタンプを更新
+    lastAbletonMessageTime = Date.now();
+    if (!abletonConnected) {
+        abletonConnected = true;
+        io.emit('ableton_status', { connected: true });
+        console.log('[Live] Ableton Liveとの通信を確立しました。');
+    }
+    
     if (config.global?.debug) {
         console.log(`[OSC Received in viewWaves]`, msg);
     }
@@ -458,6 +478,9 @@ let connectedClients = 0;
 io.on('connection', (socket) => {
     connectedClients++;
     console.log(`[Web] Browser connected. Total: ${connectedClients}`);
+    
+    // 現在のAbleton接続状態を接続直後のクライアントに個別通知
+    socket.emit('ableton_status', { connected: abletonConnected });
     
     // ブラウザ接続直後に、サーバーが保持している現在の再生状態を即座に同期する
     // (OSCの冗長更新を弾くようにしたため、新規接続クライアントにはキャッシュを送信する必要がある)
