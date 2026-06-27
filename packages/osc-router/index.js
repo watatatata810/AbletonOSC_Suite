@@ -41,6 +41,10 @@ const TARGET_PORTS = config.targetPorts;
 const server = dgram.createSocket('udp4');
 const client = dgram.createSocket('udp4');
 
+client.on('error', (err) => {
+  console.error(`[Router Client Error] ${err.stack}`);
+});
+
 server.on('error', (err) => {
   console.error(`[Router Error] ${err.stack}`);
   try {
