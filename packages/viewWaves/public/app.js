@@ -54,6 +54,32 @@ if (syncButton) {
 // key: trackId, value: { ws, containerEl }
 const tracks = {};
 
+function resetAllTracksUI() {
+    // 既存のトラック要素をDOMから削除し、WaveSurferインスタンスを破棄する
+    Object.keys(tracks).forEach(trackId => {
+        const t = tracks[trackId];
+        // ダブルバッファリングされている両レイヤーの WaveSurfer を破棄
+        if (t.wavesurferA) {
+            try { t.wavesurferA.destroy(); } catch (e) {}
+        }
+        if (t.wavesurferB) {
+            try { t.wavesurferB.destroy(); } catch (e) {}
+        }
+        if (t.boxEl) {
+            try { t.boxEl.remove(); } catch (e) {}
+        }
+        delete tracks[trackId];
+    });
+    
+    // 他のUI関連グローバル変数をリセット
+    isSongPlaying = false;
+    selectedSceneIndex = -1;
+    
+    // empty-state-message (同期待ち/接続待ち) の表示状態を更新
+    updateEmptyState();
+    console.log('[UI] Ableton切断に伴い、すべてのトラック表示を初期化しました。');
+}
+
 let isSongPlaying = false;
 let selectedSceneIndex = -1;
 
@@ -395,6 +421,7 @@ socket.on('connect', () => {
 
 socket.on('disconnect', () => {
     document.body.className = 'status-disconnected'; // サーバー切断時は赤枠
+    resetAllTracksUI(); // 画面をクリーンアップ
 });
 
 socket.on('ableton_status', (data) => {
@@ -402,6 +429,7 @@ socket.on('ableton_status', (data) => {
         document.body.className = 'status-connected'; // Ableton疎通時は緑枠
     } else {
         document.body.className = 'status-waiting'; // 疎通待ち時はオレンジ枠
+        resetAllTracksUI(); // 画面をクリーンアップ
     }
 });
 
