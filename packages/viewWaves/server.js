@@ -202,15 +202,26 @@ const POLL_INTERVAL = config.viewWaves?.pollInterval ?? 500;
 setInterval(() => {
     pollCounter++;
     
-    // タイムアウト監視：最後のパケット受信から4秒以上経過していたら切断と判定
-    if (lastAbletonMessageTime > 0 && Date.now() - lastAbletonMessageTime > 4000) {
+    // タイムアウト監視：最後のパケット受信から4秒以上経過していたら一時切断、20秒以上で完全リセット
+    const elapsed = lastAbletonMessageTime > 0 ? Date.now() - lastAbletonMessageTime : 0;
+    if (elapsed > 4000) {
         if (abletonConnected) {
             abletonConnected = false;
-            numTracks = 0; // 接続復帰時にトラック情報が再読み込みされるようリセット
+            // 一時タイムアウト：画面は消さない（reset: false）
+            io.emit('ableton_status', { connected: false, reset: false });
+            debugLog('Ableton Liveとの通信がタイムアウトしました。一時待機状態（疎通待ち）に移行します。');
+        }
+        
+        // 20秒以上パケットが途絶えた場合、Abletonが再起動または終了されたとみなし、状態を完全クリア
+        if (elapsed > 20000 && numTracks > 0) {
+            numTracks = 0;
+            for (const key in playingSlots) delete playingSlots[key];
+            for (const key in activeClips) delete activeClips[key];
+            clipLengths = {};
             
-            // 【変更】一時的な通信遮断ではキャッシュを消さず維持（Abletonへの再問い合わせの遅延を回避するため）
-            io.emit('ableton_status', { connected: false });
-            debugLog('Ableton Liveとの通信がタイムアウトしました。疎通待ちに移行します。');
+            // 完全タイムアウト：画面をクリアさせる（reset: true）
+            io.emit('ableton_status', { connected: false, reset: true });
+            debugLog('Ableton Liveとの通信が20秒以上途絶えたため、状態キャッシュを完全クリアします。');
         }
     }
     
