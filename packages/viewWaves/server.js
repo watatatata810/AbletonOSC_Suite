@@ -417,6 +417,11 @@ oscServer.on('message', (msg) => {
         emitMarkersIfReady(trackId, slotIndex);
     }
     else if (address === '/live/clip/get/playing_position' || address === '/live/clip/playing_position') {
+        // 初期化が完了（トラック数が確定）するまでは、処理をスキップして起動時の過負荷を防ぐ
+        if (numTracks === 0) {
+            return;
+        }
+
         const trackId = args[0];
         const slotIndex = args[1];
         const position = args[2];
@@ -534,29 +539,41 @@ oscServer.on('message', (msg) => {
     }
 });
 
-function setupAbletonListeners() {
-    debugLog(`Setting up listeners for ${numTracks} tracks...`);
-    
-    // 全体の再生状態（スペースキー等）を監視開始
-    oscClient.send('/live/song/start_listen/is_playing');
-    oscClient.send('/live/song/get/is_playing');
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // テンポ的監視開始
-    oscClient.send('/live/song/start_listen/tempo');
-    oscClient.send('/live/song/get/tempo');
+async function setupAbletonListeners() {
+    debugLog(`Setting up listeners for ${numTracks} tracks with 20ms staggered interval...`);
     
-    // 選択中シーンの監視と初期値取得
-    oscClient.send('/live/view/start_listen/selected_scene');
-    oscClient.send('/live/view/get/selected_scene');
-    
-    // 全トラックの再生状態を監視開始
-    for (let i = 0; i < numTracks; i++) {
-        oscClient.send('/live/track/start_listen/playing_slot_index', i);
-        oscClient.send('/live/track/get/playing_slot_index', i);
+    try {
+        // 全体の再生状態（スペースキー等）を監視開始
+        oscClient.send('/live/song/start_listen/is_playing');
+        oscClient.send('/live/song/get/is_playing');
+        await sleep(20);
+
+        // テンポ的監視開始
+        oscClient.send('/live/song/start_listen/tempo');
+        oscClient.send('/live/song/get/tempo');
+        await sleep(20);
         
-        // トラック名の監視も開始
-        oscClient.send('/live/track/start_listen/name', i);
-        oscClient.send('/live/track/get/name', i);
+        // 選択中シーンの監視と初期値取得
+        oscClient.send('/live/view/start_listen/selected_scene');
+        oscClient.send('/live/view/get/selected_scene');
+        await sleep(20);
+        
+        // 全トラックの再生状態を監視開始
+        for (let i = 0; i < numTracks; i++) {
+            oscClient.send('/live/track/start_listen/playing_slot_index', i);
+            oscClient.send('/live/track/get/playing_slot_index', i);
+            await sleep(20);
+            
+            // トラック名の監視も開始
+            oscClient.send('/live/track/start_listen/name', i);
+            oscClient.send('/live/track/get/name', i);
+            await sleep(20);
+        }
+        debugLog(`Finished setting up listeners for ${numTracks} tracks.`);
+    } catch (e) {
+        console.error('Failed to setup Ableton listeners:', e);
     }
 }
 
