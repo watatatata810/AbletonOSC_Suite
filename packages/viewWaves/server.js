@@ -294,6 +294,16 @@ oscServer.on('message', (msg) => {
         io.emit('ableton_status', { connected: true });
         debugLog('Ableton Liveとの通信を確立しました。');
         
+        // 疎通が復活したタイミングで、すでにトラック数が確定していればリスナーを再登録する
+        if (numTracks > 0) {
+            setupAbletonListeners();
+        }
+        
+        // 復活した瞬間、サーバー側で再生中とキャッシュしていれば即座にブラウザに再生開始を通知
+        if (serverIsPlaying) {
+            io.emit('song_playing');
+        }
+        
         // 【変更】疎通が復活した瞬間に、現在の状態キャッシュをブラウザに再同期する
         syncActiveClipsToClients();
     }
@@ -328,29 +338,7 @@ oscServer.on('message', (msg) => {
         
         numTracks = val;
         debugLog(`Received /live/song/num_tracks: ${numTracks}`);
-        debugLog(`Detected ${numTracks} tracks in the song. Setting up listeners...`);
-        
-        // 全体の再生状態（スペースキー等）を監視開始
-        oscClient.send('/live/song/start_listen/is_playing');
-        oscClient.send('/live/song/get/is_playing');
-
-        // テンポ的監視開始
-        oscClient.send('/live/song/start_listen/tempo');
-        oscClient.send('/live/song/get/tempo');
-        
-        // 選択中シーンの監視と初期値取得
-        oscClient.send('/live/view/start_listen/selected_scene');
-        oscClient.send('/live/view/get/selected_scene');
-        
-        // 全トラックの再生状態を監視開始
-        for (let i = 0; i < numTracks; i++) {
-            oscClient.send('/live/track/start_listen/playing_slot_index', i);
-            oscClient.send('/live/track/get/playing_slot_index', i);
-            
-            // トラック名の監視も開始
-            oscClient.send('/live/track/start_listen/name', i);
-            oscClient.send('/live/track/get/name', i);
-        }
+        setupAbletonListeners();
     }
     else if (address === '/live/track/get/name') {
         const trackId = args[0];
@@ -545,6 +533,32 @@ oscServer.on('message', (msg) => {
         handleSelectedSceneChanged(sceneIndex);
     }
 });
+
+function setupAbletonListeners() {
+    debugLog(`Setting up listeners for ${numTracks} tracks...`);
+    
+    // 全体の再生状態（スペースキー等）を監視開始
+    oscClient.send('/live/song/start_listen/is_playing');
+    oscClient.send('/live/song/get/is_playing');
+
+    // テンポ的監視開始
+    oscClient.send('/live/song/start_listen/tempo');
+    oscClient.send('/live/song/get/tempo');
+    
+    // 選択中シーンの監視と初期値取得
+    oscClient.send('/live/view/start_listen/selected_scene');
+    oscClient.send('/live/view/get/selected_scene');
+    
+    // 全トラックの再生状態を監視開始
+    for (let i = 0; i < numTracks; i++) {
+        oscClient.send('/live/track/start_listen/playing_slot_index', i);
+        oscClient.send('/live/track/get/playing_slot_index', i);
+        
+        // トラック名の監視も開始
+        oscClient.send('/live/track/start_listen/name', i);
+        oscClient.send('/live/track/get/name', i);
+    }
+}
 
 function handleSelectedSceneChanged(sceneIndex) {
     if (selectedSceneIndex === sceneIndex) return;
