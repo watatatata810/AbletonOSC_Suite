@@ -194,7 +194,7 @@ button:active {
 .waveform {
     position: relative;
     width: 100%;
-    height: 128px;
+    height: 100px;
     background-color: #121212;
     border-radius: 4px;
     overflow-x: clip;   /* ズーム時にWaveSurferラッパーが親からはみ出さないよう制限 */
@@ -390,4 +390,89 @@ button:active {
 
 body.hide-badges .badges-wrapper {
     display: none !important;
+}
+
+/* Global Scene Status Styles */
+.global-scene-status {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background-color: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 15px;
+    margin-bottom: 20px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 13px;
+    box-sizing: border-box;
+    transition: opacity 0.3s ease;
+}
+
+.global-scene-status .status-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.global-scene-status .playing-section {
+    border-right: 1px solid var(--border-color);
+    padding-right: 20px;
+    flex-shrink: 0;
+}
+
+.global-scene-status .standby-section {
+    flex-grow: 1;
+}
+
+.global-scene-status .status-label {
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 1px;
+    font-size: 11px;
+}
+
+.global-scene-status .standby-scenes-list {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.global-scene-status .scene-badge {
+    font-weight: bold;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    background-color: rgba(255, 255, 255, 0.03);
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.global-scene-status .scene-badge.status-empty {
+    border-style: dashed;
+    color: rgba(255, 255, 255, 0.2);
+    background-color: transparent;
+}
+
+.global-scene-status .scene-badge.status-playing {
+    color: #121212;
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 8px rgba(255, 152, 0, 0.3);
+}
+
+.global-scene-status .scene-badge.status-ready {
+    color: #4CAF50;
+    background-color: rgba(76, 175, 80, 0.08);
+    border-color: rgba(76, 175, 80, 0.3);
+}
+
+.global-scene-status .scene-badge.status-loading {
+    color: #2196F3;
+    background-color: rgba(33, 150, 243, 0.08);
+    border-color: rgba(33, 150, 243, 0.3);
 }

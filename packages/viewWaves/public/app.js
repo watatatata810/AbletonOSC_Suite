@@ -2,6 +2,9 @@ const socket = io();
 // Text status was removed, we use body class instead
 const waveformsContainer = document.getElementById('waveforms-container');
 
+// グローバルなシーン名のキャッシュ（key: sceneIndex, value: name）
+const globalSceneNames = {};
+
 // ラグ補正（レイテンシ先読み）の設定値
 let latencyOffsetMs = 0;
 const latencySlider = document.getElementById('latency-slider');
@@ -47,6 +50,7 @@ if (syncButton) {
             t.infoEl.textContent = '同期中...';
         });
         socket.emit('force_sync');
+        updateGlobalSceneStatus();
     });
 }
 
@@ -77,6 +81,7 @@ function resetAllTracksUI() {
     
     // empty-state-message (同期待ち/接続待ち) の表示状態を更新
     updateEmptyState();
+    updateGlobalSceneStatus();
     console.log('[UI] Ableton切断に伴い、すべてのトラック表示を初期化しました。');
 }
 
@@ -535,7 +540,7 @@ function getOrCreateTrackUI(trackId) {
         progressColor: 'transparent',
         cursorColor: '#fff',
         cursorWidth: 2,
-        height: 128,
+        height: 100,
         interact: false, // Prevent user clicking to seek
         autoScroll: true,  // overflow-x: auto を維持するため true (手動スクロール可能にする)
         autoCenter: false  // 自前で制御するため標準機能はオフ
@@ -652,6 +657,7 @@ function getOrCreateTrackUI(trackId) {
         updateTrackMarkers(tracks[trackId]);
         updateLayerBadgesUI(trackId);
         sortVisibleTracks();
+        updateGlobalSceneStatus();
     };
     const onReadyB = () => {
         tracks[trackId].layers.B.isReady = true;
@@ -677,6 +683,7 @@ function getOrCreateTrackUI(trackId) {
         updateTrackMarkers(tracks[trackId]);
         updateLayerBadgesUI(trackId);
         sortVisibleTracks();
+        updateGlobalSceneStatus();
     };
     
     wsA.on('ready', onReadyA);
@@ -704,6 +711,7 @@ function getOrCreateTrackUI(trackId) {
         updateTrackMarkers(tracks[trackId]);
         updateLayerBadgesUI(trackId);
         sortVisibleTracks();
+        updateGlobalSceneStatus();
     };
     
     wsC.on('ready', onReadyC);
@@ -827,6 +835,7 @@ socket.on('clip_playing', (data) => {
             if (err.name !== 'AbortError') console.error('WaveSurfer load error:', err);
         });
     }
+    updateGlobalSceneStatus();
 });
 
 socket.on('clip_stopped', (data) => {
@@ -864,6 +873,7 @@ socket.on('clip_stopped', (data) => {
         t.boxEl.classList.remove('visible');
         updateEmptyState();
     }
+    updateGlobalSceneStatus();
 });
 
 socket.on('song_stopped', () => {
@@ -882,6 +892,7 @@ socket.on('song_stopped', () => {
         }
     });
     updateEmptyState();
+    updateGlobalSceneStatus();
 });
 
 socket.on('song_playing', () => {
@@ -898,6 +909,7 @@ socket.on('song_playing', () => {
         }
     });
     updateEmptyState();
+    updateGlobalSceneStatus();
 });
 
 socket.on('clip_position', (data) => {
@@ -1004,6 +1016,7 @@ function animateCursor(trackId) {
 
 socket.on('scene_name', (data) => {
     const { sceneIndex, name } = data;
+    globalSceneNames[sceneIndex] = name;
     Object.keys(tracks).forEach(trackId => {
         const t = tracks[trackId];
         if (t.currentSceneIndex === sceneIndex) {
@@ -1011,6 +1024,7 @@ socket.on('scene_name', (data) => {
             updateTrackTitle(parseInt(trackId));
         }
     });
+    updateGlobalSceneStatus();
 });
 
 socket.on('track_name', (data) => {
@@ -1025,6 +1039,7 @@ socket.on('selected_scene_changed', (data) => {
     Object.keys(tracks).forEach(trackId => {
         updateLayerBadgesUI(trackId);
     });
+    updateGlobalSceneStatus();
 });
 
 // 次のシーンの音声ファイルを裏でダウンロード（キャッシュ）しておく処理
@@ -1068,6 +1083,7 @@ socket.on('clip_preload', (data) => {
     layer.ws.load(url).catch(err => {
         if (err.name !== 'AbortError') console.error('Preload WaveSurfer load error:', err);
     });
+    updateGlobalSceneStatus();
 });
 
 socket.on('clip_selected_preload', (data) => {
@@ -1112,6 +1128,7 @@ socket.on('clip_selected_preload', (data) => {
     layer.ws.load(url).catch(err => {
         if (err.name !== 'AbortError') console.error('Selected preload WaveSurfer load error:', err);
     });
+    updateGlobalSceneStatus();
 });
 
 socket.on('clip_selected_preload_empty', (data) => {
@@ -1131,6 +1148,7 @@ socket.on('clip_selected_preload_empty', (data) => {
     });
     
     updateLayerBadgesUI(trackId);
+    updateGlobalSceneStatus();
 });
 
 // マーカー情報を受信したときの処理
@@ -1189,6 +1207,88 @@ if (badgeToggle) {
 }
 
 
+
+/**
+ * 全トラックのロード状況を集約し、グローバルシーンステータスバーを更新する
+ */
+function updateGlobalSceneStatus() {
+    const playingEl = document.getElementById('global-playing-scene');
+    const standbyContainer = document.getElementById('global-standby-scenes');
+    if (!playingEl || !standbyContainer) return;
+
+    let activePlayingSceneIndex = -1;
+    let isAnyTrackPlaying = false;
+    
+    // key: slotIndex, value: { isReady: boolean, tracksCount: number }
+    const loadedScenesMap = {};
+
+    Object.values(tracks).forEach(track => {
+        // 再生中シーンの検出
+        if (track.currentSceneIndex >= 0 && isSongPlaying) {
+            activePlayingSceneIndex = track.currentSceneIndex;
+            isAnyTrackPlaying = true;
+        }
+
+        // ロードされている各レイヤーの調査
+        Object.keys(track.layers).forEach(layerKey => {
+            const layer = track.layers[layerKey];
+            if (layer.url) {
+                const slot = layer.slotIndex;
+                if (!loadedScenesMap[slot]) {
+                    loadedScenesMap[slot] = {
+                        isReady: true,
+                        tracksCount: 0
+                    };
+                }
+                loadedScenesMap[slot].tracksCount++;
+                if (!layer.isReady) {
+                    loadedScenesMap[slot].isReady = false; // 1つでもロード中でないトラックがあれば false
+                }
+            }
+        });
+    });
+
+    // 1. 再生中シーンバッジの描画
+    if (isAnyTrackPlaying && activePlayingSceneIndex >= 0) {
+        const name = globalSceneNames[activePlayingSceneIndex] || `Scene ${activePlayingSceneIndex + 1}`;
+        playingEl.textContent = name;
+        playingEl.className = 'scene-badge status-playing';
+    } else {
+        playingEl.textContent = '---';
+        playingEl.className = 'scene-badge status-empty';
+    }
+
+    // 2. スタンバイ中シーン一覧の描画
+    // 再生中以外のロード済みシーンを昇順でソート
+    const standbySlots = Object.keys(loadedScenesMap)
+        .map(Number)
+        .filter(slot => slot !== activePlayingSceneIndex)
+        .sort((a, b) => a - b);
+
+    standbyContainer.innerHTML = '';
+    
+    if (standbySlots.length === 0) {
+        const emptyBadge = document.createElement('div');
+        emptyBadge.className = 'scene-badge status-empty';
+        emptyBadge.textContent = '---';
+        standbyContainer.appendChild(emptyBadge);
+    } else {
+        standbySlots.forEach(slot => {
+            const sceneInfo = loadedScenesMap[slot];
+            const name = globalSceneNames[slot] || `Scene ${slot + 1}`;
+            
+            const badge = document.createElement('div');
+            badge.className = `scene-badge ${sceneInfo.isReady ? 'status-ready' : 'status-loading'}`;
+            
+            if (sceneInfo.isReady) {
+                badge.textContent = name;
+            } else {
+                badge.innerHTML = `${name} <span class="badge-spinner">↺</span>`;
+            }
+            standbyContainer.appendChild(badge);
+        });
+    }
+}
 
 function updateClock() {
     if (!digitalClock) return;

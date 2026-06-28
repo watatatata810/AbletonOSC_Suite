@@ -32,6 +32,19 @@
         
         <div id="digital-clock" class="digital-clock">00:00:00</div>
 
+        <div id="global-scene-status" class="global-scene-status">
+            <div class="status-section playing-section">
+                <span class="status-label">PLAYING</span>
+                <div id="global-playing-scene" class="scene-badge status-empty">---</div>
+            </div>
+            <div class="status-section standby-section">
+                <span class="status-label">STANDBY</span>
+                <div id="global-standby-scenes" class="standby-scenes-list">
+                    <div class="scene-badge status-empty">---</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Header was removed for cleaner UI -->
         <div id="empty-state-message" class="empty-state-message">
             Play a clip to display waveforms...
