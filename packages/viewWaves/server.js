@@ -128,6 +128,20 @@ app.get('/debug/clip', (req, res) => {
 });
 
 const oscClient = new Client(clientHost, clientPort);
+
+// 送信したOSCリクエストのタイムスタンプ記録用
+const pendingRequests = new Map();
+
+// oscClient.send をラップして送信時刻を記録する
+const originalSend = oscClient.send.bind(oscClient);
+oscClient.send = function(address, ...args) {
+    if (address.includes('/get/') || address.includes('/start_listen/')) {
+        const key = `${address}_${args.join('_')}`;
+        pendingRequests.set(key, Date.now());
+    }
+    originalSend(address, ...args);
+};
+
 const oscServer = new OscServer(serverPort, clientHost, () => {
     console.log(`[OSC] Listening for AbletonOSC messages on port ${serverPort}`);
 });
@@ -290,9 +304,20 @@ oscServer.on('message', (msg) => {
     const address = msg[0];
     const args = msg.slice(1);
 
+    // OSCレスポンスのRTT（応答時間）の計測
+    if (address.includes('/get/')) {
+        const reqArgs = args.slice(0, -1);
+        const key = `${address}_${reqArgs.join('_')}`;
+        const sendTime = pendingRequests.get(key);
+        if (sendTime) {
+            const rtt = Date.now() - sendTime;
+            debugLog(`[OSC-RTT] ${address} (${reqArgs.join(', ')}): ${rtt} ms`);
+            pendingRequests.delete(key);
+        }
+    }
+
     if (address === '/live/song/get/num_tracks') {
         const val = args[0];
-        const rtt = Date.now() - debugRequestStartTime;
         
         // すでにトラック数が確定している場合は、重複してリスナー登録を送らない（バーストガード）
         if (numTracks > 0) {
@@ -302,7 +327,7 @@ oscServer.on('message', (msg) => {
         }
         
         numTracks = val;
-        debugLog(`Received /live/song/num_tracks: ${numTracks} (RTT: ${rtt}ms)`);
+        debugLog(`Received /live/song/num_tracks: ${numTracks}`);
         debugLog(`Detected ${numTracks} tracks in the song. Setting up listeners...`);
         
         // 全体の再生状態（スペースキー等）を監視開始
