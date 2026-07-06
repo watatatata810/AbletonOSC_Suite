@@ -80,6 +80,16 @@ header h1 {
     background-color: var(--danger-hover);
 }
 
+.btn.warning {
+    background-color: #eab02d;
+    border-color: #eab02d;
+    color: #000000;
+}
+
+.btn.warning:hover {
+    background-color: #d19b22;
+}
+
 main {
     flex: 1;
     padding: 20px;
