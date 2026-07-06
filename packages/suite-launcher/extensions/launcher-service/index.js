@@ -212,7 +212,7 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', async () => {
       try {
-        const data = JSON.parse(body);
+        const data = body ? JSON.parse(body) : {};
         if (req.url === '/start') {
           const result = await startPackage(data.package);
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -221,6 +221,36 @@ const server = http.createServer(async (req, res) => {
           const result = await stopPackage(data.package);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
+        } else if (req.url === '/launch-ableton') {
+          const abletonPath = appConfig.global?.abletonPath;
+          if (!abletonPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'config.json 内に abletonPath が設定されていません。' }));
+            return;
+          }
+
+          if (!fs.existsSync(abletonPath)) {
+            logToFile(`Ableton Live not found at: ${abletonPath}`);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: `指定されたパスに Ableton Live が見つかりません: ${abletonPath}` }));
+            return;
+          }
+
+          logToFile(`Launching Ableton Live from: ${abletonPath}`);
+          try {
+            const child = spawn(abletonPath, [], {
+              detached: true,
+              stdio: 'ignore'
+            });
+            child.unref();
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+          } catch (err) {
+            logToFile(`Failed to launch Ableton Live: ${err.message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: `起動エラー: ${err.message}` }));
+          }
         } else {
           res.writeHead(404);
           res.end();
