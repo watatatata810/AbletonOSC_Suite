@@ -167,6 +167,24 @@ async function showQrCode(e) {
       document.getElementById('btn-all-start').addEventListener('click', () => handleAll('start'));
       document.getElementById('btn-all-stop').addEventListener('click', () => handleAll('stop'));
 
+      // Ableton Live 起動イベント
+      document.getElementById('btn-ableton-start').addEventListener('click', async () => {
+          logToConsole('Ableton Live を起動しています...');
+          try {
+              const res = await fetch(`${API_BASE}/launch-ableton`, {
+                  method: 'POST'
+              });
+              const result = await res.json();
+              if (result.success) {
+                  logToConsole('Ableton Live の起動要求に成功しました。');
+              } else {
+                  logToConsole(`Ableton Live の起動に失敗: ${result.message}`);
+              }
+          } catch (err) {
+              logToConsole(`通信エラー: ${err.message}`);
+          }
+      });
+
       document.getElementById('console-toggle').addEventListener('click', () => {
           isConsoleOpen = !isConsoleOpen;
           document.getElementById('console-logs').classList.toggle('open', isConsoleOpen);
