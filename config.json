@@ -3,6 +3,7 @@
     "abletonHost": "127.0.0.1",
     "abletonPort": 11000,
     "httpHost": "0.0.0.0",
+    "abletonPath": "C:\\ProgramData\\Ableton\\Live 12 Standard\\Program\\Ableton Live 12 Standard.exe",
     "debug": false
   },
   "packages": [
