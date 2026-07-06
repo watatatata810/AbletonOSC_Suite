@@ -34,7 +34,7 @@
       "minHeight": 400,
       "center": true,
       "alwaysOnTop": false,
-      "icon": "/resources/favicon.ico",
+      "icon": "/resources/icons/appIcon.png",
       "enableInspector": false,
       "exitProcessOnClose": true
     }
