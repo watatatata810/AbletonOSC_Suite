@@ -24,3 +24,9 @@ packages/*/.serena/
 # DaihonTrigger local project/upload data
 packages/DaihonTrigger/project_data.json
 packages/DaihonTrigger/public/assets/
+
+# Claude temp
+.claude/tmp/
+
+# Videos
+/videos/
