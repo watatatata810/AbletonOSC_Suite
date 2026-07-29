@@ -24,8 +24,32 @@ const activeClips = {};
 let abletonConnected = false;
 let lastAbletonMessageTime = 0;
 
-// 親プロセス（Neutralino）が終了した際に確実に自身も終了するフェイルセーフ
-process.stdin.on('end', () => process.exit(0));
+// --- 起動経路の判定 ---
+// Neutralino は拡張プロセスの起動時、接続情報（nlPort / nlToken / nlConnectToken /
+// nlExtensionId）を JSON で stdin に流し込む。これを受け取れたかどうかで
+// 「Neutralino 配下で動いているか」を判定する（起動時のみ使用）。
+//
+// 【重要】stdin の終了を「親プロセスが死んだ」合図に使ってはいけない。
+// Neutralino はこの JSON を書き込んだ直後に stdin を閉じるため、
+// 'end' / 'close' で終了するとサーバーが起動直後に自死し、
+// Neutralino 側は待機画面のスピナーが回り続ける。
+// 公式ドキュメントでも親の終了検知は WebSocket IPC の切断で行うとされている。
+// 現状の実効的なフェイルセーフは、下の stdout/stderr の EPIPE ハンドラ。
+let isNeutralinoExtension = false;
+
+process.stdin.on('data', (chunk) => {
+    try {
+        const payload = JSON.parse(chunk.toString());
+        if (payload && payload.nlExtensionId) {
+            isNeutralinoExtension = true;
+            console.log(`[Server] Running as a Neutralino extension (${payload.nlExtensionId}).`);
+        }
+    } catch (e) {
+        // 接続情報以外は使わないため、パースできない入力は無視してよい
+    }
+});
+process.stdin.resume(); // resume() しないと 'data' が流れてこない
+
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 
@@ -701,13 +725,22 @@ io.on('connection', (socket) => {
 });
 
 function startServer(port, host, retries) {
-    server.listen(port, host, () => {
+    // リトライは同一の server インスタンスに対して行うため、リスナーは必ず once() で
+    // 登録し、決着がついた時点で相方を外す。
+    // （listen(cb) や on() のまま再試行すると、試行回数ぶんリスナーが積み増しされ
+    //   MaxListenersExceededWarning を出したうえでハンドラが多重発火する）
+    const onListening = () => {
+        server.removeListener('error', onError);
         console.log(`[Server] Web server running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
         console.log(`[Server] Waiting for browser to connect...`);
-    }).on('error', (err) => {
+    };
+
+    const onError = (err) => {
+        server.removeListener('listening', onListening);
+
         if (err.code === 'EADDRINUSE' && retries > 0) {
             console.log(`[Server] Port ${port} in use. Retrying in 500ms... (${retries} retries left)`);
-            setTimeout(() => startServer(port, retries - 1), 500);
+            setTimeout(() => startServer(port, host, retries - 1), 500);
         } else {
             if (err.code === 'EADDRINUSE') {
                 console.error(`\n[Error] ポート ${port} はすでに使用されています。`);
@@ -717,8 +750,12 @@ function startServer(port, host, retries) {
             }
             fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] Server listen error: ${err.stack}\n`);
             
-            // 多重起動時のフェイルセーフ: ポートが使用中の場合、親プロセス(Neutralino)も強制終了させる
-            if (process.ppid) {
+            // 多重起動時のフェイルセーフ: Neutralino の待機画面はサーバー応答を無限に
+            // ポーリングし続けるため、起動できないまま放置するとスピナーが回り続ける。
+            // そのため親（Neutralino本体）ごと終了させる。
+            // ただし npm start 等で直接起動された場合、親はユーザーのシェルや npm であり、
+            // それを SIGKILL するのは明確に有害なので、拡張として起動された時に限定する。
+            if (isNeutralinoExtension && process.ppid) {
                 try {
                     process.kill(process.ppid, 'SIGKILL');
                 } catch (e) {
@@ -727,7 +764,11 @@ function startServer(port, host, retries) {
             }
             process.exit(1);
         }
-    });
+    };
+
+    server.once('listening', onListening);
+    server.once('error', onError);
+    server.listen(port, host);
 }
 
 startServer(WEB_PORT, HTTP_HOST, 10); // 最大5秒間（500ms x 10回）リトライする
