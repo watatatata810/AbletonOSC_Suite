@@ -58,23 +58,45 @@ if (syncButton) {
 // key: trackId, value: { ws, containerEl }
 const tracks = {};
 
+/**
+ * トラック1つぶんのリソースを完全に解放する。
+ * WaveSurfer（3レイヤー）・共有WebGL上のGPUバッファ・ResizeObserver・
+ * 実行中のアニメーションフレームをすべて後始末してからDOMを外す。
+ */
+function destroyTrack(trackId) {
+    const t = tracks[trackId];
+    if (!t) return;
+
+    // 破棄済みオブジェクトへコールバックが走らないよう、先にループを止める
+    if (t.animationFrameId) cancelAnimationFrame(t.animationFrameId);
+    if (t.zoomRAFId) cancelAnimationFrame(t.zoomRAFId);
+    t.animationFrameId = null;
+    t.zoomRAFId = null;
+
+    // A/B/C 全レイヤーの WaveSurfer を破棄する
+    // （破棄漏れは AudioContext とデコード済みバッファをそのまま残す）
+    Object.keys(t.layers).forEach(key => {
+        const layer = t.layers[key];
+        if (layer && layer.ws) {
+            try {
+                layer.ws.destroy();
+            } catch (e) {
+                console.warn(`[UI] Track ${trackId} layer ${key} の WaveSurfer 破棄に失敗:`, e);
+            }
+        }
+    });
+
+    // 共有WebGLコンテキスト上のバッファと監視を解放する
+    if (t.webglWaveform) t.webglWaveform.destroy();
+
+    if (t.boxEl) t.boxEl.remove();
+    delete tracks[trackId];
+}
+
 function resetAllTracksUI() {
     // 既存のトラック要素をDOMから削除し、WaveSurferインスタンスを破棄する
-    Object.keys(tracks).forEach(trackId => {
-        const t = tracks[trackId];
-        // ダブルバッファリングされている両レイヤーの WaveSurfer を破棄
-        if (t.wavesurferA) {
-            try { t.wavesurferA.destroy(); } catch (e) {}
-        }
-        if (t.wavesurferB) {
-            try { t.wavesurferB.destroy(); } catch (e) {}
-        }
-        if (t.boxEl) {
-            try { t.boxEl.remove(); } catch (e) {}
-        }
-        delete tracks[trackId];
-    });
-    
+    Object.keys(tracks).forEach(trackId => destroyTrack(trackId));
+
     // 他のUI関連グローバル変数をリセット
     isSongPlaying = false;
     selectedSceneIndex = -1;
@@ -434,9 +456,34 @@ socket.on('ableton_status', (data) => {
         document.body.className = 'status-connected'; // Ableton疎通時は緑枠
     } else {
         document.body.className = 'status-waiting'; // 疎通待ち時はオレンジ枠
-        resetAllTracksUI(); // 一時タイムアウトでも画面を即座にクリア
+        // 2段階タイムアウト（docs/260627-1548_ableton-two-stage-timeout-design.md §2.2）:
+        // 4秒の一時切断（reset: false）では波形を残したまま枠だけオレンジ明滅させ、
+        // Ableton側が生きている前提でカーソルのローカル補間を継続する。
+        // 20秒超の完全切断（reset: true）でのみ画面を初期化する。
+        if (data.reset) {
+            resetAllTracksUI();
+        }
     }
 });
+
+/**
+ * 現在のズーム状態と実サイズから、WebGL側の表示範囲を再計算して同期する。
+ * フィット表示（currentZoom === 0）の倍率はコンテナ幅に依存するため、
+ * ウィンドウリサイズ後はこれを呼ばないと波形が旧サイズのまま取り残される。
+ */
+function syncWebGLView(trackId) {
+    const t = tracks[trackId];
+    if (!t || !t.ws || !t.webglWaveform) return;
+
+    const duration = t.ws.getDuration();
+    const scrollContainer = t.ws.renderer && t.ws.renderer.scrollContainer;
+    if (!duration || !scrollContainer) return;
+
+    const pxPerSec = t.currentZoom === 0
+        ? (scrollContainer.clientWidth / duration)
+        : t.currentZoom;
+    t.webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
+}
 
 function getOrCreateTrackUI(trackId) {
     if (tracks[trackId]) return tracks[trackId];
@@ -548,7 +595,32 @@ function getOrCreateTrackUI(trackId) {
     const wsB = WaveSurfer.create({ container: `#ws-layer-b-${trackId}`, ...wsOptions });
     const wsC = WaveSurfer.create({ container: `#ws-layer-c-${trackId}`, ...wsOptions });
 
-    const webglWaveform = new WebGLWaveform(webglCanvas, { color: [1.0, 0.596, 0.0, 1.0] });
+    // WebGLコンテキストはアプリ全体で1個を共有し、ここではその描画ハンドルだけを受け取る
+    // （トラック毎にコンテキストを確保すると、16トラック超のセットで上限に達して波形が消える）
+    const webglWaveform = window.sharedWaveformRenderer.createTrackRenderer(webglCanvas, {
+        color: [1.0, 0.596, 0.0, 1.0]
+    });
+
+    // GPUリセット等でコンテキストが失われた場合、デコード済みデータから作り直す
+    webglWaveform.onContextRestored = () => {
+        const t = tracks[trackId];
+        if (!t) return;
+        Object.keys(t.layers).forEach(key => {
+            const decoded = t.layers[key].ws && t.layers[key].ws.getDecodedData();
+            if (decoded) {
+                webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, key);
+            }
+        });
+        webglWaveform.setActiveLayer(t.activeLayerKey);
+    };
+
+    // ウィンドウリサイズ等で描画領域の実サイズが変わった時、
+    // フィット表示の倍率とマーカーのグレーアウト位置を追従させる
+    webglWaveform.onResize = () => {
+        if (!tracks[trackId]) return;
+        syncWebGLView(trackId);
+        updateOverlayUI(trackId);
+    };
 
     // スクロール時にもオーバーレイとWebGL位置を追従させる
     wsA.on('scroll', () => {
