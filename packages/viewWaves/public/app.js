@@ -570,31 +570,22 @@ function getOrCreateTrackUI(trackId) {
     };
 
     // スクロール時にもオーバーレイとWebGL位置を追従させる
-    wsA.on('scroll', () => {
-        updateOverlayUI(trackId);
-        if (tracks[trackId].activeLayerKey === 'A') {
-            const pxPerSec = tracks[trackId].currentZoom === 0 ? (wsA.renderer.scrollContainer.clientWidth / wsA.getDuration()) : tracks[trackId].currentZoom;
-            webglWaveform.setView(pxPerSec, wsA.renderer.scrollContainer.scrollLeft);
-        }
-    });
-    wsB.on('scroll', () => {
-        updateOverlayUI(trackId);
-        if (tracks[trackId].activeLayerKey === 'B') {
-            const pxPerSec = tracks[trackId].currentZoom === 0 ? (wsB.renderer.scrollContainer.clientWidth / wsB.getDuration()) : tracks[trackId].currentZoom;
-            webglWaveform.setView(pxPerSec, wsB.renderer.scrollContainer.scrollLeft);
-        }
-    });
-    wsC.on('scroll', () => {
-        updateOverlayUI(trackId);
-        if (tracks[trackId].activeLayerKey === 'C') {
-            const pxPerSec = tracks[trackId].currentZoom === 0 ? (wsC.renderer.scrollContainer.clientWidth / wsC.getDuration()) : tracks[trackId].currentZoom;
-            webglWaveform.setView(pxPerSec, wsC.renderer.scrollContainer.scrollLeft);
-        }
+    // （A/B/C で処理は同一。アクティブなレイヤーのスクロールだけを WebGL に反映する）
+    Object.entries({ A: wsA, B: wsB, C: wsC }).forEach(([layerKey, ws]) => {
+        ws.on('scroll', () => {
+            updateOverlayUI(trackId);
+            const t = tracks[trackId];
+            if (t && t.activeLayerKey === layerKey) {
+                syncWebGLView(trackId);
+            }
+        });
     });
 
     // WaveSurfer標準のジャンプスクロールを無効化（自前で滑らかに制御するため）
+    // 3レイヤーすべてに適用する（漏らすとそのレイヤーがアクティブな時だけ挙動が変わる）
     wsA.renderer.scrollIntoView = () => {};
     wsB.renderer.scrollIntoView = () => {};
+    wsC.renderer.scrollIntoView = () => {};
     
     patchReRenderForZoom(wsA);
     patchReRenderForZoom(wsB);
@@ -650,88 +641,41 @@ function getOrCreateTrackUI(trackId) {
         }
     }, { passive: false });
 
-    const onReadyA = () => {
-        tracks[trackId].layers.A.isReady = true;
-        webglWaveform.resize();
-        
-        // Active/Inactiveに関わらず、デコード完了時に即座にWebGLバッファを構築（プリレンダリング）
-        const decoded = wsA.getDecodedData();
-        if (decoded) {
-            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'A');
-        }
-        
-        if (tracks[trackId].currentZoom !== 0) {
-            tracks[trackId].layers.A.ws.zoom(tracks[trackId].currentZoom);
-        }
-        
-        // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
-        if (tracks[trackId].activeLayerKey === 'A') {
-            const scrollContainer = wsA.renderer.scrollContainer;
-            const pxPerSec = tracks[trackId].currentZoom === 0 ? (scrollContainer.clientWidth / wsA.getDuration()) : tracks[trackId].currentZoom;
-            webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
-        }
-        
-        updateTrackMarkers(tracks[trackId]);
-        updateLayerBadgesUI(trackId);
-        sortVisibleTracks();
-        updateGlobalSceneStatus();
-    };
-    const onReadyB = () => {
-        tracks[trackId].layers.B.isReady = true;
-        webglWaveform.resize();
-        
-        // 同様にB面もデコード完了時に即座に構築
-        const decoded = wsB.getDecodedData();
-        if (decoded) {
-            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'B');
-        }
-        
-        if (tracks[trackId].currentZoom !== 0) {
-            tracks[trackId].layers.B.ws.zoom(tracks[trackId].currentZoom);
-        }
-        
-        // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
-        if (tracks[trackId].activeLayerKey === 'B') {
-            const scrollContainer = wsB.renderer.scrollContainer;
-            const pxPerSec = tracks[trackId].currentZoom === 0 ? (scrollContainer.clientWidth / wsB.getDuration()) : tracks[trackId].currentZoom;
-            webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
-        }
-        
-        updateTrackMarkers(tracks[trackId]);
-        updateLayerBadgesUI(trackId);
-        sortVisibleTracks();
-        updateGlobalSceneStatus();
-    };
-    
-    wsA.on('ready', onReadyA);
-    wsB.on('ready', onReadyB);
+    /**
+     * レイヤーのデコード完了時の処理。A/B/C で内容が完全に同じなので生成関数にまとめる。
+     * 非アクティブなレイヤーでも即座にWebGLバッファを構築しておく（プリレンダリング）ことで、
+     * シーン切り替え時にレイヤーを差し替えるだけで表示が完了する。
+     */
+    const makeOnReady = (layerKey, ws) => () => {
+        const t = tracks[trackId];
+        if (!t) return; // 破棄済みトラックのready通知は無視する
 
-    const onReadyC = () => {
-        tracks[trackId].layers.C.isReady = true;
+        t.layers[layerKey].isReady = true;
         webglWaveform.resize();
-        
-        const decoded = wsC.getDecodedData();
+
+        const decoded = ws.getDecodedData();
         if (decoded) {
-            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, 'C');
+            webglWaveform.updateData(decoded.getChannelData(0), decoded.sampleRate, layerKey);
         }
-        
-        if (tracks[trackId].currentZoom !== 0) {
-            tracks[trackId].layers.C.ws.zoom(tracks[trackId].currentZoom);
+
+        if (t.currentZoom !== 0) {
+            ws.zoom(t.currentZoom);
         }
-        
-        if (tracks[trackId].activeLayerKey === 'C') {
-            const scrollContainer = wsC.renderer.scrollContainer;
-            const pxPerSec = tracks[trackId].currentZoom === 0 ? (scrollContainer.clientWidth / wsC.getDuration()) : tracks[trackId].currentZoom;
-            webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
+
+        // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
+        if (t.activeLayerKey === layerKey) {
+            syncWebGLView(trackId);
         }
-        
-        updateTrackMarkers(tracks[trackId]);
+
+        updateTrackMarkers(t);
         updateLayerBadgesUI(trackId);
         sortVisibleTracks();
         updateGlobalSceneStatus();
     };
-    
-    wsC.on('ready', onReadyC);
+
+    wsA.on('ready', makeOnReady('A', wsA));
+    wsB.on('ready', makeOnReady('B', wsB));
+    wsC.on('ready', makeOnReady('C', wsC));
 
     return tracks[trackId];
 }
@@ -822,9 +766,7 @@ socket.on('clip_playing', (data) => {
             t.webglWaveform.setActiveLayer(swapTargetKey);
             
             // スワップ直後に最新のズームとスクロール位置をWebGLに同期する
-            const scrollContainer = t.ws.renderer.scrollContainer;
-            const pxPerSec = t.currentZoom === 0 ? (scrollContainer.clientWidth / t.ws.getDuration()) : t.currentZoom;
-            t.webglWaveform.setView(pxPerSec, scrollContainer.scrollLeft);
+            syncWebGLView(trackId);
         }
         
         // スワップされた（元アクティブだった）レイヤーをリセットする
