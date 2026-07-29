@@ -153,7 +153,11 @@ process.stderr.on('error', (err) => {
 });
 
 const WEB_PORT = pkgConfig.httpPort ?? (process.env.PORT || 3000);
-const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
+// 待ち受けアドレス。既定は同一マシンのみ（127.0.0.1）。
+// 0.0.0.0 にするとLAN内の任意の端末から、再生中クリップの一覧や音声ファイルへ
+// アクセスできてしまうため、必要な場合だけ明示的に開く運用にする。
+// パッケージ個別の設定を優先し、global は他パッケージと共有のため後段で見る。
+const HTTP_HOST = pkgConfig.httpHost ?? config.global?.httpHost ?? '127.0.0.1';
 
 /**
  * ローカル（同一マシン）から来たリクエストかどうかを Origin ヘッダで判定する。

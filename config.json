@@ -20,6 +20,7 @@
       "dir": "packages/viewWaves",
       "type": "neutralino",
       "httpPort": 3000,
+      "httpHost": "127.0.0.1",
       "oscPort": 11002,
       "pollInterval": 500,
       "dependencies": ["osc-router"]
