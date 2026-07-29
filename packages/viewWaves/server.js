@@ -155,10 +155,35 @@ process.stderr.on('error', (err) => {
 const WEB_PORT = pkgConfig.httpPort ?? (process.env.PORT || 3000);
 const HTTP_HOST = config.global?.httpHost ?? '0.0.0.0';
 
-// CORS設定：Neutralinojsの待機画面からのアクセスを許可するため、一番最初に定義する
+/**
+ * ローカル（同一マシン）から来たリクエストかどうかを Origin ヘッダで判定する。
+ * Neutralino の待機画面は自身のローカルサーバー（ポートは起動ごとに変わる）から
+ * fetch してくるため、ポートは限定できない。ホスト名だけで判定する。
+ */
+function isLocalOrigin(origin) {
+    if (!origin) return false;
+    try {
+        const hostname = new URL(origin).hostname;
+        return hostname === 'localhost'
+            || hostname === '127.0.0.1'
+            || hostname === '::1'
+            || hostname === '[::1]';
+    } catch (e) {
+        return false;
+    }
+}
+
+// CORS設定：Neutralinojsの待機画面からのアクセスを許可するため、一番最初に定義する。
+// 以前は Access-Control-Allow-Origin: * だったため、ユーザーがブラウザで開いた
+// 任意のWebサイトから再生中クリップの一覧や音声ファイルを読み取れる状態だった。
+// 用途上必要なのはローカルオリジンだけなので、そこに限定する。
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    const origin = req.headers.origin;
+    if (isLocalOrigin(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Vary', 'Origin'); // オリジンごとに応答が変わるためキャッシュを分離する
+        res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    }
     next();
 });
 
@@ -195,8 +220,13 @@ app.get('/audio', (req, res) => {
     res.sendFile(path.resolve(audioPath));
 });
 
-// デバッグ用：サーバーが保持しているクリップ情報をJSON返却する
+// デバッグ用：サーバーが保持しているクリップ情報をJSON返却する。
+// 音源の絶対パスを含むため、config.global.debug が真のときだけ有効にする。
+// （存在自体を知らせないよう、無効時は 403 ではなく 404 を返す）
 app.get('/debug/clip', (req, res) => {
+    if (!DEBUG_ENABLED) {
+        return res.status(404).send('Not Found');
+    }
     const trackId = req.query.track !== undefined ? req.query.track : null;
     const slotIndex = req.query.slot !== undefined ? req.query.slot : null;
     
@@ -408,7 +438,9 @@ const lastClipPositionEmitTime = {}; // key: trackId, value: timestamp
 
 // ポーリング処理：0.5秒に1回実行されるが、マーカー情報は2秒に1回に間引く
 let pollCounter = 0;
-const POLL_INTERVAL = config.viewWaves?.pollInterval ?? 500;
+// config.json では packages[] 配下に定義されているため、pkgConfig から読む
+// （config.viewWaves という階層は存在せず、設定値が常に無視されていた）
+const POLL_INTERVAL = pkgConfig.pollInterval ?? 500;
 setInterval(() => {
     pollCounter++;
     
