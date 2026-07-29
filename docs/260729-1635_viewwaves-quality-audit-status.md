@@ -8,10 +8,10 @@
 
 | 区分 | 件数 |
 |---|---|
-| ✅ 完了（実機検証済み） | 13 |
-| ⬜ 未着手 | 12 |
+| ✅ 完了（実機検証済み） | 15 |
+| ⬜ 未着手 | 11 |
 
-未着手のうち優先度Aは3件（テスト基盤・依存固定・同期I/O）。
+優先度A のうち残るは A-3（同期I/O）のみ。A-3 は B-3 と依存関係があるためセットで対応する。
 
 ---
 
@@ -51,6 +51,18 @@
   C-7 と同根。`updateOverlayUI()` がリサイズ経路から呼ばれていなかった。
   → `onResize` から呼び出し。**検証**: 幅1180pxで left 236 / right 354（期待値と完全一致）。
 
+- [x] **A-2: wavesurfer.js のバージョンが固定されていなかった**
+  `"^7.12.8"`（caret）指定だったが、app.js は `renderer.reRender` / `render` /
+  `scrollIntoView` / `unsubscribeOnScroll` / `scrollContainer` / `audioData` という**非公開API**に依存しており、パッチリリースでも壊れ得た。
+  → `7.12.8` に完全固定。さらに `assertWaveSurferInternals()` を追加し、固定が外れて内部APIが消えた場合に**無言で壊れず**コンソールで原因が分かるようにした。
+  **検証**: 正常系で誤検知なし、`reRender` 欠落／`renderer` 自体の欠落をどちらも検知。
+
+- [x] **A-1: テストが0本だった**
+  純粋関数は「テスト容易性のため」分離済みなのにテストが存在せず、C-3 の判定は実装が3回往復していた。
+  → 純粋関数を `public/waveform-math.js` へ抽出（ブラウザではグローバル関数、Nodeでは `module.exports`）。`node:test` で **30ケース**を追加（追加依存ゼロ）。`npm test` で実行できる。
+  reset フラグの判定は `shouldResetTracksUI()` として切り出し、テストで固定した。
+  **検証**: 30/30 パス。さらに変異テストで「無条件クリアに戻す」「残り時間の丸めを切り捨て→四捨五入に変える」の両方を検知できることを確認済み。
+
 以下は C-2 の書き換えに伴って同時に解消:
 
 - [x] **C-9: LOD0 が全長を1本の LINE_STRIP で描画** → 可視範囲のみ描画。最大ズーム時 220,500 → 39,780 頂点
@@ -64,15 +76,6 @@
 ## ⬜ 未着手
 
 ### 優先度 A
-
-- [ ] **A-1: テストが0本**
-  `npm test` は `exit 1`。純粋関数 `calculateAbsoluteProgress` / `calculateMarkerPercentages` / `calculateTimeDisplay`（[app.js:124-214](../packages/viewWaves/public/app.js#L124-L214)）は「テスト容易性のため」分離済みなのに、テストが存在しない。
-  C-3 の3往復は、まさに回帰テストが防ぐ類のもの。
-  **対応**: まず上記3関数のユニットテスト + `ableton_status` の reset フラグ挙動を固定するテスト。
-
-- [ ] **A-2: wavesurfer.js のバージョンが固定されていない**
-  `package.json` は `"wavesurfer.js": "^7.12.8"`（caret）。一方で `renderer.reRender` / `unsubscribeOnScroll` / `renderer.scrollContainer` / `renderer.scrollIntoView` という**非公開API**をモンキーパッチしている（[app.js:347](../packages/viewWaves/public/app.js#L347) の `patchReRenderForZoom` ほか）。パッチリリース1つで無言で壊れる。
-  **対応**: caret を外して固定。低コスト・高効果。
 
 - [ ] **A-3: 同期I/Oのデバッグログが常時ON**
   [server.js:209](../packages/viewWaves/server.js#L209) の `debugLog` は `appendFileSync`（ブロッキング）で、`config.global.debug` に関係なく常時実行。RTT計測が全 `/get/` 応答で呼ぶため、毎秒30〜60発の位置パケットを捌く同じイベントループ上で走る。
@@ -113,6 +116,11 @@
 - [ ] **C-e: サーバー側のリスナー再登録が設計書と矛盾（要経緯確認）**
   [server.js:321-323](../packages/viewWaves/server.js#L321-L323) は疎通復帰時に無条件で `setupAbletonListeners()` を呼ぶ。設計書は「一時切断では `/start_listen` を送信しない」としているが、この処理は `84a5c04` で**意図的に**追加されたもの。実症状があった可能性が高いため未変更のまま残している。
   **対応**: 触る前に当時の症状を確認する。
+
+- [ ] **C-g: 残り時間表示が浮動小数点誤差で1秒短く出ることがある**（A-1 のテスト作成中に発見）
+  マーカー範囲が 20%〜70% のようにきりの悪い値だと、`0.7 - 0.2` が `0.49999999999999994` になり、切り捨てのため **`-05:00` が `-04:59` と表示される**。
+  「表示より長く残っていることはない」という方針では**安全側**に外れるため実害は小さく、現時点では現状の挙動をテストで固定してある（安全側であることは性質テストで担保済み）。
+  **対応**: 直すなら丸め仕様の合意が先。厳密にするなら進行度ではなく秒数で引き算する必要がある。
 
 - [ ] **C-f: `seekTo` の呼び出し頻度（要計測）**
   `animateCursor` が毎フレーム `t.ws.seekTo()` を呼ぶ = トラック数 × 60回/秒 で MediaElement の `currentTime` を設定している。実負荷は未計測。まず測ってから判断する。
