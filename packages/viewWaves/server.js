@@ -19,6 +19,10 @@ const clientHost = config.global?.abletonHost ?? '127.0.0.1';
 const clientPort = config.global?.abletonPort ?? (process.env.ABLETON_PORT || 11000);
 const serverPort = pkgConfig.oscPort ?? (process.env.OSC_PORT || 11002);
 
+// 高頻度の診断ログ（RTT計測・パケット頻度など）を出すかどうか。
+// ホットパスの分岐で参照するため、他の定義より先に確定させる。
+const DEBUG_ENABLED = config.global?.debug === true;
+
 // 現在再生中のクリップを管理（TrackID -> SlotIndex）
 const activeClips = {};
 let abletonConnected = false;
@@ -33,8 +37,7 @@ let lastAbletonMessageTime = 0;
 // Neutralino はこの JSON を書き込んだ直後に stdin を閉じるため、
 // 'end' / 'close' で終了するとサーバーが起動直後に自死し、
 // Neutralino 側は待機画面のスピナーが回り続ける。
-// 公式ドキュメントでも親の終了検知は WebSocket IPC の切断で行うとされている。
-// 現状の実効的なフェイルセーフは、下の stdout/stderr の EPIPE ハンドラ。
+// 親の終了検知は、公式仕様どおり WebSocket IPC の切断で行う（connectNeutralinoIPC）。
 let isNeutralinoExtension = false;
 
 process.stdin.on('data', (chunk) => {
@@ -43,6 +46,7 @@ process.stdin.on('data', (chunk) => {
         if (payload && payload.nlExtensionId) {
             isNeutralinoExtension = true;
             console.log(`[Server] Running as a Neutralino extension (${payload.nlExtensionId}).`);
+            connectNeutralinoIPC(payload);
         }
     } catch (e) {
         // 接続情報以外は使わないため、パースできない入力は無視してよい
@@ -50,8 +54,62 @@ process.stdin.on('data', (chunk) => {
 });
 process.stdin.resume(); // resume() しないと 'data' が流れてこない
 
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+// --- 親プロセス（Neutralino）の死活監視 ---
+// Neutralino は終了時に拡張プロセスへ kill シグナルを送らないため、拡張側が
+// IPC の切断を検知して自分で終了しないとゾンビプロセスが残り、
+// 次回起動時に EADDRINUSE を起こす。
+//
+// 【重要】「接続に失敗した」場合に終了してはいけない。
+// close は接続成功前にも発火するため、無条件に exit するとサーバーが起動直後に
+// 自死する（stdin を使っていた時に実際に起きた事象と同じ）。
+// そのため open を一度でも通った場合に限って終了する。
+const IPC_MAX_ATTEMPTS = 3;
+const IPC_RETRY_INTERVAL = 1000;
+
+function connectNeutralinoIPC(payload, attempt = 1) {
+    if (!payload.nlPort) return;
+
+    const url = `ws://localhost:${payload.nlPort}?extensionId=${encodeURIComponent(payload.nlExtensionId)}`
+        + `&connectToken=${encodeURIComponent(payload.nlConnectToken || '')}`;
+
+    let opened = false;
+
+    let socket;
+    try {
+        socket = new WebSocket(url);
+    } catch (e) {
+        console.warn('[Server] Neutralino IPC への接続を開始できませんでした:', e.message);
+        return;
+    }
+
+    socket.onopen = () => {
+        opened = true;
+        debugLog('[Server] Neutralino IPC に接続しました。親プロセスの終了を監視します。');
+    };
+
+    socket.onclose = () => {
+        if (opened) {
+            shutdownWithLog('[Server] Neutralino IPC が切断されました。親が終了したためサーバーも終了します。');
+            return;
+        }
+
+        // 接続確立前の close は「つながらなかった」だけ。ここで終了してはいけない
+        if (attempt < IPC_MAX_ATTEMPTS) {
+            setTimeout(() => connectNeutralinoIPC(payload, attempt + 1), IPC_RETRY_INTERVAL);
+        } else {
+            console.warn(
+                `[Server] Neutralino IPC へ接続できませんでした（${IPC_MAX_ATTEMPTS}回試行）。`
+                + '親プロセスの終了監視は無効のまま動作を継続します。'
+            );
+        }
+    };
+
+    // onclose も併せて発火するため、ここでは記録のみ行う
+    socket.onerror = () => {};
+}
+
+process.on('SIGINT', () => shutdownWithLog('[Server] SIGINT を受信したため終了します。'));
+process.on('SIGTERM', () => shutdownWithLog('[Server] SIGTERM を受信したため終了します。'));
 
 // グローバルエラーハンドリング（クラッシュ原因の特定用）
 process.on('uncaughtException', (err) => {
@@ -77,12 +135,21 @@ process.on('unhandledRejection', (reason, promise) => {
     fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] Unhandled Rejection: ${reason}\n`);
 });
 
-// stdout/stderr の EPIPE も捕捉して正常終了
+// stdout/stderr の EPIPE も捕捉して正常終了する。
+// 親が落ちた時は IPC切断とこちらがほぼ同時に発火するが、
+// どちらが先でも shutdownWithLog 側で一本化される。
+// 即 exit せずログを残すのは、どちらの経路で終了したかを事後に判別するため。
 process.stdout.on('error', (err) => {
-    if (err.code === 'EPIPE') process.exit(0);
+    if (err.code === 'EPIPE') {
+        stdoutBroken = true;
+        shutdownWithLog('[Server] 標準出力のパイプが閉じられたため終了します（親プロセス終了）。');
+    }
 });
 process.stderr.on('error', (err) => {
-    if (err.code === 'EPIPE') process.exit(0);
+    if (err.code === 'EPIPE') {
+        stdoutBroken = true;
+        shutdownWithLog('[Server] 標準エラー出力のパイプが閉じられたため終了します（親プロセス終了）。');
+    }
 });
 
 const WEB_PORT = pkgConfig.httpPort ?? (process.env.PORT || 3000);
@@ -153,13 +220,15 @@ app.get('/debug/clip', (req, res) => {
 
 const oscClient = new Client(clientHost, clientPort);
 
-// 送信したOSCリクエストのタイムスタンプ記録用
+// 送信したOSCリクエストのタイムスタンプ記録用（RTT計測専用）
 const pendingRequests = new Map();
 
-// oscClient.send をラップして送信時刻を記録する
+// oscClient.send をラップして送信時刻を記録する。
+// RTT計測は debug 有効時のみ行うため、記録側も同じ条件でゲートする
+// （受信側だけ止めると、記録したエントリが二度と削除されず Map に溜まり続ける）。
 const originalSend = oscClient.send.bind(oscClient);
 oscClient.send = function(address, ...args) {
-    if (address.includes('/get/') || address.includes('/start_listen/')) {
+    if (DEBUG_ENABLED && (address.includes('/get/') || address.includes('/start_listen/'))) {
         const key = `${address}_${args.join('_')}`;
         pendingRequests.set(key, Date.now());
     }
@@ -197,17 +266,120 @@ let serverIsPlaying = false;
 let selectedSceneIndex = -1;
 let selectedSceneTimer = null;
 
-// デバッグ用ファイル書き出し定義
+// --- ログ出力 ---
+// 以前は appendFileSync（ブロッキング）を全ログで実行しており、毎秒30〜60発の
+// OSCパケットを捌くイベントループ上で同期syscallが平均3.5回/秒走っていた。
+// また出力量に上限が無く、6時間の稼働で5.5MBまで肥大していた。
+//
+// 対策:
+//   - 書き込みを WriteStream（非同期）に変更する
+//   - 高頻度の診断ログ（RTT・パケット頻度など）は traceLog に分け、
+//     config.global.debug が真のときだけ出す
+//   - ファイルサイズに上限を設け、超えたら1世代だけ退避して切り替える
 const logFilePath = path.join(__dirname, 'server.log');
-try {
-    fs.writeFileSync(logFilePath, `Server Debug Log Started\n`);
-} catch (e) {}
+// ローテーション先も *.log にする（.gitignore の `*.log` に確実に一致させるため）
+const prevLogFilePath = path.join(__dirname, 'server.prev.log');
+const LOG_SIZE_LIMIT = 5 * 1024 * 1024; // 5MB
 
+let logStream = null;
+let logBytesWritten = 0;
+
+function openLogStream() {
+    try {
+        logStream = fs.createWriteStream(logFilePath, { flags: 'w' });
+        // 書き込みに失敗してもアプリ本体は動かし続ける（ログのために落とさない）
+        logStream.on('error', (err) => {
+            console.error('[Log] ログファイルへの書き込みに失敗しました。ファイル出力を停止します:', err.message);
+            logStream = null;
+        });
+        logBytesWritten = 0;
+    } catch (e) {
+        logStream = null;
+    }
+}
+
+function rotateLogIfNeeded() {
+    if (logBytesWritten < LOG_SIZE_LIMIT) return;
+    try {
+        const finished = logStream;
+        logStream = null;
+        if (finished) finished.end();
+        fs.renameSync(logFilePath, prevLogFilePath);
+    } catch (e) {
+        // 退避に失敗した場合も、新しいストリームを開き直せば書き込みは継続できる
+    }
+    openLogStream();
+}
+
+function writeLogLine(msg) {
+    if (!logStream) return;
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+    logBytesWritten += Buffer.byteLength(line);
+    logStream.write(line);
+    rotateLogIfNeeded();
+}
+
+openLogStream();
+writeLogLine(`Server Debug Log Started (debug=${DEBUG_ENABLED})`);
+
+/**
+ * 常時記録するログ。接続確立・タイムアウト・初期化など、
+ * 事後に不具合を追うために必要な低頻度のイベントに限って使う。
+ */
 function debugLog(msg) {
     console.log(msg);
-    try {
-        fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] ${msg}\n`);
-    } catch (e) {}
+    writeLogLine(msg);
+}
+
+/**
+ * 高頻度の診断ログ。config.global.debug が真のときだけ出力する。
+ * OSCのホットパスから呼ばれるため、無効時は文字列生成以外の負荷をかけない。
+ */
+function traceLog(msg) {
+    if (!DEBUG_ENABLED) return;
+    console.log(msg);
+    writeLogLine(msg);
+}
+
+/**
+ * 終了理由を記録してからプロセスを終了する。
+ *
+ * ログは WriteStream（非同期）で書いているため、debugLog した直後に
+ * process.exit() すると最後の行がバッファに残ったまま失われる。
+ * 終了理由は事後調査で最も重要なので、書き込み完了を待ってから終了する。
+ * ストリームが詰まった場合に備えて待ち時間には上限を設ける。
+ */
+let shuttingDown = false;
+let stdoutBroken = false;
+
+function shutdownWithLog(msg, code = 0) {
+    // 親プロセス終了時は IPC切断・stdoutのEPIPE がほぼ同時に起きるため、
+    // 先に到達した方だけを処理する（二重終了とストリームの二重closeを防ぐ）
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    // stdout が壊れている状態で書くと EPIPE が再発するだけなので書かない
+    if (!stdoutBroken) console.log(msg);
+
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+
+    const stream = logStream;
+    logStream = null;
+
+    if (!stream) {
+        process.exit(code);
+        return;
+    }
+
+    let exited = false;
+    const done = () => {
+        if (exited) return;
+        exited = true;
+        process.exit(code);
+    };
+
+    setTimeout(done, 300).unref();
+    stream.end(line, done);
 }
 
 function syncActiveClipsToClients() {
@@ -270,7 +442,7 @@ setInterval(() => {
         if (now - lastNumTracksRequestTime > 2000) {
             lastNumTracksRequestTime = now;
             debugRequestStartTime = now;
-            debugLog(`Sending /live/song/get/num_tracks`);
+            traceLog(`Sending /live/song/get/num_tracks`);
             oscClient.send('/live/song/get/num_tracks');
         }
     }
@@ -339,13 +511,15 @@ oscServer.on('message', (msg) => {
     const args = msg.slice(1);
 
     // OSCレスポンスのRTT（応答時間）の計測
-    if (address.includes('/get/')) {
+    // 全 /get/ 応答で走るホットパスなので、計測ごとブロック単位で無効化する
+    // （文字列生成・Map操作も含めて debug 無効時はコストをかけない）
+    if (DEBUG_ENABLED && address.includes('/get/')) {
         const reqArgs = args.slice(0, -1);
         const key = `${address}_${reqArgs.join('_')}`;
         const sendTime = pendingRequests.get(key);
         if (sendTime) {
             const rtt = Date.now() - sendTime;
-            debugLog(`[OSC-RTT] ${address} (${reqArgs.join(', ')}): ${rtt} ms`);
+            traceLog(`[OSC-RTT] ${address} (${reqArgs.join(', ')}): ${rtt} ms`);
             pendingRequests.delete(key);
         }
     }
@@ -356,7 +530,7 @@ oscServer.on('message', (msg) => {
         // すでにトラック数が確定している場合は、重複してリスナー登録を送らない（バーストガード）
         if (numTracks > 0) {
             numTracks = val; // 値だけ更新
-            debugLog(`Received redundant /live/song/num_tracks: ${val} (Skipped listener setup)`);
+            traceLog(`Received redundant /live/song/num_tracks: ${val} (Skipped listener setup)`);
             return;
         }
         
@@ -455,7 +629,7 @@ oscServer.on('message', (msg) => {
         debugPlayingPositionCount++;
         const now = Date.now();
         if (now - debugLastLogTime >= 1000) {
-            debugLog(`Receiving /playing_position at ${debugPlayingPositionCount} pkts/sec`);
+            traceLog(`Receiving /playing_position at ${debugPlayingPositionCount} pkts/sec`);
             debugPlayingPositionCount = 0;
             debugLastLogTime = now;
         }
