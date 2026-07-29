@@ -334,6 +334,45 @@ function sortVisibleTracks() {
 }
 
 /**
+ * このアプリが依存している WaveSurfer の内部（非公開）API。
+ * 公開APIではないため、バージョンが上がると予告なく消える可能性がある。
+ * そのため package.json では wavesurfer.js を **完全固定** している（caret を付けない）。
+ */
+const REQUIRED_WAVESURFER_INTERNALS = [
+    'reRender',          // ズーム時のスクロール自動補正をスキップするために差し替える
+    'render',            // パッチ版 reRender から直接呼ぶ
+    'scrollIntoView',    // 自前でカーソル制御するため無効化する
+    'unsubscribeOnScroll' // パッチ版 reRender でリスナーを解除する
+];
+
+let waveSurferInternalsChecked = false;
+
+/**
+ * 依存している内部APIが揃っているかを起動時に1度だけ検証する。
+ * 固定を外した／npm update した等でAPIが消えた場合、
+ * 波形が無言で壊れるのではなく、原因が分かる形で気づけるようにする。
+ */
+function assertWaveSurferInternals(ws) {
+    if (waveSurferInternalsChecked) return;
+    waveSurferInternalsChecked = true;
+
+    const renderer = ws.renderer;
+    if (!renderer) {
+        console.error('[WaveSurfer] renderer が見つかりません。wavesurfer.js のバージョンを確認してください（想定: 7.12.8）。');
+        return;
+    }
+
+    const missing = REQUIRED_WAVESURFER_INTERNALS.filter(key => renderer[key] === undefined);
+    if (missing.length > 0) {
+        console.error(
+            `[WaveSurfer] 依存している内部APIが見つかりません: ${missing.join(', ')}\n` +
+            'wavesurfer.js のバージョンが想定（7.12.8）と異なる可能性があります。' +
+            'ズーム・スクロール・波形描画が正しく動作しません。'
+        );
+    }
+}
+
+/**
  * WaveSurfer V7 の renderer.reRender() をモンキーパッチし、
  * フラグが立っている間はズーム時のスクロール自動補正をスキップさせる。
  *
@@ -345,6 +384,8 @@ function sortVisibleTracks() {
  * パッチ版は手順4だけをスキップする。
  */
 function patchReRenderForZoom(ws) {
+    assertWaveSurferInternals(ws);
+
     const renderer = ws.renderer;
     const origReRender = renderer.reRender.bind(renderer);
 
