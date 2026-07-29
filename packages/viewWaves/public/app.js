@@ -973,8 +973,12 @@ function animateCursor(trackId) {
     t.animationFrameId = requestAnimationFrame(() => animateCursor(trackId));
 }
 
-socket.on('scene_name', (data) => {
-    const { sceneIndex, name } = data;
+/**
+ * シーン名を1件取り込み、そのシーンを再生中のトラックのタイトルにも反映する。
+ * 表示側は名前が空なら "Scene N" にフォールバックするため、
+ * 名前無しのシーンをそのまま渡しても問題ない。
+ */
+function applySceneName(sceneIndex, name) {
     globalSceneNames[sceneIndex] = name;
     Object.keys(tracks).forEach(trackId => {
         const t = tracks[trackId];
@@ -982,6 +986,20 @@ socket.on('scene_name', (data) => {
             t.sceneName = name;
             updateTrackTitle(parseInt(trackId));
         }
+    });
+}
+
+socket.on('scene_name', (data) => {
+    applySceneName(data.sceneIndex, data.name);
+    updateGlobalSceneStatus();
+});
+
+// 全シーン名の一括受信。
+// 以前は「再生を開始したシーン」の名前しか取得していなかったため、
+// スタンバイ中のシーンは名前が付いていても "Scene N" と表示されていた。
+socket.on('scene_names', (names) => {
+    Object.keys(names).forEach(index => {
+        applySceneName(Number(index), names[index]);
     });
     updateGlobalSceneStatus();
 });

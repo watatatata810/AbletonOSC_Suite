@@ -296,6 +296,11 @@ let numTracks = 0;
 const playingSlots = {}; // key: trackId, value: slotIndex
 let clipLengths = {}; // { "trackId_slotIndex": length, "trackId_slotIndex_start": startMarker, ... }
 let currentTempo = 120.0;
+// シーン名のキャッシュ（key: sceneIndex, value: name）。
+// 以前はシーンが「再生を開始した」ときにしか名前を取得していなかったため、
+// スタンバイ中のシーンは名前が付いていても "Scene N" と表示されていた。
+// 起動時に一括取得して全シーンぶん保持する。
+let sceneNames = {};
 let serverIsPlaying = false;
 let selectedSceneIndex = -1;
 let selectedSceneTimer = null;
@@ -464,6 +469,9 @@ setInterval(() => {
             for (const key in playingSlots) delete playingSlots[key];
             for (const key in activeClips) delete activeClips[key];
             clipLengths = {};
+            // 別プロジェクトが開かれた可能性があるため、シーン名も捨てる
+            // （古い名前を出し続けるより "Scene N" のほうが誤解が無い）
+            sceneNames = {};
             
             // 完全タイムアウト：画面をクリアさせる（reset: true）
             io.emit('ableton_status', { connected: false, reset: true });
@@ -646,7 +654,18 @@ oscServer.on('message', (msg) => {
     else if (address === '/live/scene/get/name') {
         const sceneIndex = args[0];
         const name = args[1];
+        sceneNames[sceneIndex] = name;
         io.emit('scene_name', { sceneIndex, name });
+    }
+    else if (address === '/live/song/get/scenes/name') {
+        // 全シーン名が index 0 から順に並んで返る（AbletonOSC の一括取得API）
+        const names = {};
+        args.forEach((name, index) => {
+            names[index] = name;
+            sceneNames[index] = name;
+        });
+        debugLog(`Received ${args.length} scene names.`);
+        io.emit('scene_names', names);
     }
     else if (address === '/live/clip/get/length') {
         const trackId = args[0];
@@ -795,6 +814,11 @@ async function setupAbletonListeners() {
         oscClient.send('/live/song/get/tempo');
         await sleep(20);
         
+        // 全シーン名を一括取得する（引数なしで index 0 から全件が返る）。
+        // スタンバイ中のシーンにも付けた名前を表示するために必要。
+        oscClient.send('/live/song/get/scenes/name');
+        await sleep(20);
+
         // 選択中シーンの監視と初期値取得
         oscClient.send('/live/view/start_listen/selected_scene');
         oscClient.send('/live/view/get/selected_scene');
@@ -893,6 +917,11 @@ io.on('connection', (socket) => {
     
     // 現在のAbleton接続状態を接続直後のクライアントに個別通知
     socket.emit('ableton_status', { connected: abletonConnected });
+
+    // 取得済みのシーン名をまとめて渡す（再取得を待たせない）
+    if (Object.keys(sceneNames).length > 0) {
+        socket.emit('scene_names', sceneNames);
+    }
     
     // ブラウザ接続直後に、サーバーが保持している現在の再生状態を即座に同期する
     // (OSCの冗長更新を弾くようにしたため、新規接続クライアントにはキャッシュを送信する必要がある)
@@ -928,6 +957,7 @@ io.on('connection', (socket) => {
         for (const key in playingSlots) delete playingSlots[key];
         for (const key in activeClips) delete activeClips[key];
         clipLengths = {};
+        sceneNames = {};
         
         // 再取得シーケンスの開始
         oscClient.send('/live/song/get/num_tracks');
