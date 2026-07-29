@@ -526,11 +526,17 @@ oscServer.on('message', (msg) => {
         io.emit('ableton_status', { connected: true });
         debugLog('Ableton Liveとの通信を確立しました。');
         
-        // 疎通が復活したタイミングで、すでにトラック数が確定していればリスナーを再登録する
-        if (numTracks > 0) {
-            setupAbletonListeners();
-        }
-        
+        // ここでリスナーの再登録（setupAbletonListeners）は行わない。
+        //
+        // 実測（2026-07-29）: osc-router を9秒停止して復帰させる試験を2回行い、
+        // 再登録なしでも復帰直後から playing_position が 10Hz で再開することを確認した。
+        // AbletonOSC 側のリスナー登録は Python 側のメモリに残るため、
+        // 経路が復旧すればそのまま流れてくる（設計書 260627-1548 §2 の想定どおり）。
+        //
+        // むしろ再生中の Ableton は毎秒60発の playing_position を送出していて
+        // ビジーなため、ここで start_listen を 2×トラック数+6 発まとめて撃つと
+        // 取りこぼしを増やす方向に働く（設計書 §1 が解消しようとした事象そのもの）。
+
         // 復活した瞬間、サーバー側で再生中とキャッシュしていれば即座にブラウザに再生開始を通知
         if (serverIsPlaying) {
             io.emit('song_playing');
