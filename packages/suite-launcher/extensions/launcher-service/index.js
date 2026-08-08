@@ -17,8 +17,19 @@ function logToFile(msg) {
     // ログ書き込み失敗時は無視
   }
 }
-const runningProcesses = {}; // { packageName: { process, pid, status } }
+const runningProcesses = {}; // { packageName: { process, pid, status, intentional } }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// --- 予期しない終了に対する自動再起動 ---
+// osc-router のようなバックグラウンドプロセスが落ちると、転送経路が黙って消えて
+// 全アプリが「波形が出ない」状態のまま復旧しないため、node 型に限って再起動する。
+// （neutralino 型はウィンドウを閉じる＝ユーザーの終了意思なので対象外）
+// クラッシュループを避けるため、60秒未満で死んだ場合のみ試行回数を数え、上限で打ち切る。
+const RESTART_MAX_ATTEMPTS = 5;
+const RESTART_DELAY_MS = 1000;
+const RESTART_STABLE_MS = 60 * 1000; // これ以上生きていたら試行回数をリセット
+const restartCounts = {}; // { packageName: count }
+let shuttingDown = false;
 
 // config.json の読み込み
 const configPath = path.join(__dirname, '..', '..', '..', '..', 'config.json');
@@ -127,9 +138,31 @@ async function startPackage(pkgName) {
     child.stderr.on('data', (data) => logToFile(`[${pkgName}] ERR: ${data.toString().trim()}`));
   }
 
+  const startedAt = Date.now();
   child.on('close', (code) => {
+    const wasIntentional = runningProcesses[pkgName]?.intentional === true;
     logToFile(`[${pkgName}] stopped with code ${code}`);
     runningProcesses[pkgName] = { status: 'stopped' };
+
+    // 予期しない終了なら自動再起動する（stop API 経由・ランチャー終了時は再起動しない）
+    if (wasIntentional || shuttingDown || pkg.type !== 'node') return;
+
+    if (Date.now() - startedAt >= RESTART_STABLE_MS) {
+      restartCounts[pkgName] = 0; // 十分生きていたので試行回数をリセット
+    }
+    const attempts = restartCounts[pkgName] || 0;
+    if (attempts >= RESTART_MAX_ATTEMPTS) {
+      logToFile(`[${pkgName}] Auto-restart limit (${RESTART_MAX_ATTEMPTS}) reached. Giving up.`);
+      return;
+    }
+    restartCounts[pkgName] = attempts + 1;
+    logToFile(`[${pkgName}] Unexpected exit. Auto-restarting in ${RESTART_DELAY_MS}ms (attempt ${attempts + 1}/${RESTART_MAX_ATTEMPTS})`);
+    setTimeout(() => {
+      if (shuttingDown) return;
+      startPackage(pkgName).then(result => {
+        if (!result.success) logToFile(`[${pkgName}] Auto-restart failed: ${result.message}`);
+      }).catch(e => logToFile(`[${pkgName}] Auto-restart error: ${e.message}`));
+    }, RESTART_DELAY_MS);
   });
 
   child.on('error', (err) => {
@@ -147,10 +180,14 @@ function stopPackage(pkgName) {
     return { success: false, message: 'Not running' };
   }
 
+  // 意図的な停止であることを close ハンドラに伝える（自動再起動の対象外にする）
+  procInfo.intentional = true;
+
   return new Promise((resolve) => {
     kill(procInfo.pid, 'SIGKILL', (err) => {
       if (err) {
         logToFile(`Failed to kill process tree for ${pkgName}: ` + err.message);
+        procInfo.intentional = false; // 停止に失敗したのでフラグを戻す
         resolve({ success: false, message: err.message });
       } else {
         runningProcesses[pkgName] = { status: 'stopped' };
@@ -273,6 +310,7 @@ server.listen(PORT, () => {
 
 // Poka-Yoke: プロセス親終了時のクリーンアップ
 function cleanup() {
+  shuttingDown = true; // 終了処理中の close イベントで自動再起動しないようにする
   logToFile('[Launcher Extension] Cleaning up child processes...');
   const keys = Object.keys(runningProcesses);
   for (const key of keys) {

@@ -269,10 +269,6 @@ oscClient.send = function(address, ...args) {
     originalSend(address, ...args);
 };
 
-const oscServer = new OscServer(serverPort, clientHost, () => {
-    console.log(`[OSC] Listening for AbletonOSC messages on port ${serverPort}`);
-});
-
 // エラーハンドラを追加してプロセス終了を防ぐ
 oscClient.on('error', (err) => {
     const IGNORE_ERRORS = ['ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL', 'EHOSTUNREACH'];
@@ -283,14 +279,59 @@ oscClient.on('error', (err) => {
     }
 });
 
-oscServer.on('error', (err) => {
-    const IGNORE_ERRORS = ['ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL', 'EHOSTUNREACH'];
-    if (err.code && IGNORE_ERRORS.includes(err.code)) {
-        console.warn(`[OSC Server Warning] Ignored temporary UDP error: ${err.message}`);
-    } else {
+// OSC受信サーバー。bind に失敗した場合はリトライし、上限に達したら明示的に終了する。
+// 以前は console.error のみで動き続けたため、ゾンビプロセスが 11002 を握っていると
+// 「HTTPは生きているのに波形が一切出ない」状態になり、原因に気づけなかった。
+let oscServer = null;
+
+function startOscServer(retries) {
+    oscServer = new OscServer(serverPort, clientHost, () => {
+        console.log(`[OSC] Listening for AbletonOSC messages on port ${serverPort}`);
+    });
+
+    oscServer.on('message', handleAbletonOscMessage);
+
+    oscServer.on('error', (err) => {
+        const IGNORE_ERRORS = ['ECONNRESET', 'ENETUNREACH', 'EADDRNOTAVAIL', 'EHOSTUNREACH'];
+        if (err.code && IGNORE_ERRORS.includes(err.code)) {
+            console.warn(`[OSC Server Warning] Ignored temporary UDP error: ${err.message}`);
+            return;
+        }
+
+        // Windows は UDP ポートの競合を EADDRINUSE ではなく EACCES で報告する
+        // （TCP は EADDRINUSE のまま）。どちらも「ポートを取れなかった」として扱う。
+        const isBindConflict = err.code === 'EADDRINUSE'
+            || (err.code === 'EACCES' && err.syscall === 'bind');
+
+        if (isBindConflict) {
+            try { oscServer.close(); } catch (e) {}
+            if (retries > 0) {
+                console.log(`[OSC] Port ${serverPort} in use (${err.code}). Retrying in 500ms... (${retries} retries left)`);
+                setTimeout(() => startOscServer(retries - 1), 500);
+                return;
+            }
+            // HTTP側の EADDRINUSE と同じ扱いで明示的に落とす
+            console.error(`\n[Error] OSC受信ポート ${serverPort} はすでに使用されています。`);
+            console.error(`リトライ上限（10回）を超えたため起動を停止します。古いプロセス（ゾンビプロセス）が残っていないか確認してください。\n`);
+            try {
+                fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] OSC server bind error: ${err.stack}\n`);
+            } catch (e) {}
+            if (isNeutralinoExtension && process.ppid) {
+                try {
+                    process.kill(process.ppid, 'SIGKILL');
+                } catch (e) {
+                    console.error('Failed to kill parent process:', e);
+                }
+            }
+            process.exit(1);
+            return;
+        }
+
         console.error('[OSC Server Error]', err);
-    }
-});
+    });
+}
+
+startOscServer(10); // 最大5秒間（500ms x 10回）リトライする
 
 let numTracks = 0;
 const playingSlots = {}; // key: trackId, value: slotIndex
@@ -479,8 +520,14 @@ setInterval(() => {
         }
     }
     
-    // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理
-    if (numTracks === 0) {
+    // 起動時の初期化パケット（num_tracks）がロスした場合のリトライ処理。
+    // 加えて、無操作の Ableton はリスナー登録済みでもパケットを一切送ってこないため
+    // （リスナーは値の変化時のみ発火する。router.log 実測で4分間無通信を確認）、
+    // 受信が2秒以上途絶えたら同じ num_tracks を keepalive として送り、
+    // 無通信をタイムアウトと誤認して画面を周期的にクリアしないようにする。
+    // 再生中は playing_position（毎秒60発）が生存信号になるためこの送信は発生せず、
+    // ビジーな Ableton への追加負荷はない（B-4 を悪化させない）。
+    if (numTracks === 0 || elapsed > 2000) {
         const now = Date.now();
         // 前回の送信から2.0秒以上経過している場合のみ送信（再送スパム防止）
         if (now - lastNumTracksRequestTime > 2000) {
@@ -525,8 +572,8 @@ setInterval(() => {
     }
 }, POLL_INTERVAL);
 
-// AbletonOSCからのメッセージ受信
-oscServer.on('message', (msg) => {
+// AbletonOSCからのメッセージ受信（oscServer 生成時に 'message' ハンドラとして登録される）
+function handleAbletonOscMessage(msg) {
     // タイムスタンプを更新
     lastAbletonMessageTime = Date.now();
     if (!abletonConnected) {
@@ -577,10 +624,32 @@ oscServer.on('message', (msg) => {
     if (address === '/live/song/get/num_tracks') {
         const val = args[0];
         
-        // すでにトラック数が確定している場合は、重複してリスナー登録を送らない（バーストガード）
+        // すでにトラック数が確定している場合、同数ならリスナー登録を送らない（バーストガード）。
+        // 数が変わった場合はセッション中のトラック追加・削除なので差分だけ追従する
+        // （追加トラックはリスナー未登録のままだと、何を再生しても永久に表示されない）。
         if (numTracks > 0) {
-            numTracks = val; // 値だけ更新
-            traceLog(`Received redundant /live/song/num_tracks: ${val} (Skipped listener setup)`);
+            if (val !== numTracks) {
+                const prev = numTracks;
+                numTracks = val;
+                debugLog(`Track count changed: ${prev} -> ${val}`);
+                if (val > prev) {
+                    registerTrackListeners(prev, val).catch(e =>
+                        console.error('Failed to register listeners for added tracks:', e));
+                } else {
+                    // 消えたトラックの状態を破棄する（存在しないトラックへのポーリング防止）
+                    for (const key in playingSlots) {
+                        if (parseInt(key, 10) >= val) delete playingSlots[key];
+                    }
+                    for (const key in activeClips) {
+                        if (parseInt(key, 10) >= val) {
+                            delete activeClips[key];
+                            io.emit('clip_stopped', { trackId: parseInt(key, 10) });
+                        }
+                    }
+                }
+            } else {
+                traceLog(`Received redundant /live/song/num_tracks: ${val} (Skipped listener setup)`);
+            }
             return;
         }
         
@@ -684,7 +753,13 @@ oscServer.on('message', (msg) => {
         const trackId = args[0];
         const slotIndex = args[1];
         const position = args[2];
-        activeClips[trackId] = slotIndex; // 再生中のクリップとして登録
+        // 再生中のクリップとして登録する。
+        // 停止直後は、遅延・並べ替えで届いた古い position パケットがクリア済みの
+        // activeClips を復活させ、停止中なのに clip_playing が再同期されてしまうため、
+        // サーバーが再生中と認識している間だけ登録する。
+        if (serverIsPlaying) {
+            activeClips[trackId] = slotIndex;
+        }
         
         // 頻度デバッグ
         debugPlayingPositionCount++;
@@ -796,7 +871,7 @@ oscServer.on('message', (msg) => {
         const sceneIndex = args[0];
         handleSelectedSceneChanged(sceneIndex);
     }
-});
+}
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -825,19 +900,27 @@ async function setupAbletonListeners() {
         await sleep(20);
         
         // 全トラックの再生状態を監視開始
-        for (let i = 0; i < numTracks; i++) {
-            oscClient.send('/live/track/start_listen/playing_slot_index', i);
-            oscClient.send('/live/track/get/playing_slot_index', i);
-            await sleep(20);
-            
-            // トラック名の監視も開始
-            oscClient.send('/live/track/start_listen/name', i);
-            oscClient.send('/live/track/get/name', i);
-            await sleep(20);
-        }
+        await registerTrackListeners(0, numTracks);
         debugLog(`Finished setting up listeners for ${numTracks} tracks.`);
     } catch (e) {
         console.error('Failed to setup Ableton listeners:', e);
+    }
+}
+
+/**
+ * [fromTrack, toTrack) のトラックにリスナー登録と初期値取得を行う。
+ * 起動時の一括登録と、セッション中にトラックが追加された場合の差分登録から使う。
+ */
+async function registerTrackListeners(fromTrack, toTrack) {
+    for (let i = fromTrack; i < toTrack; i++) {
+        oscClient.send('/live/track/start_listen/playing_slot_index', i);
+        oscClient.send('/live/track/get/playing_slot_index', i);
+        await sleep(20);
+
+        // トラック名の監視も開始
+        oscClient.send('/live/track/start_listen/name', i);
+        oscClient.send('/live/track/get/name', i);
+        await sleep(20);
     }
 }
 
