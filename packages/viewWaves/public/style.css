@@ -160,7 +160,7 @@ button:active {
 .track-box.visible {
     /* Animation active states (visible) */
     opacity: 1;
-    max-height: 400px; /* sufficiently large for contents */
+    max-height: 600px; /* 狭幅で多行タイトルになっても収まる高さ */
     margin-bottom: 0;
     padding-top: 20px;
     padding-bottom: 10px;
@@ -174,6 +174,7 @@ button:active {
 .track-header {
     display: flex;
     justify-content: space-between;
+    gap: 12px;
     margin-bottom: 15px;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 10px;
@@ -184,11 +185,16 @@ button:active {
 .track-title {
     font-size: 18px;
     font-weight: bold;
+    min-width: 0;               /* flex子のmin-width:autoを解除して縮小可能にする */
+    overflow-wrap: anywhere;    /* 空白なしの長いファイル名でも折り返す */
 }
 
 .track-info {
     font-size: 14px;
     color: #888;
+    flex-shrink: 0;             /* 長いトラック名に押されてもSceneラベルは折らない */
+    white-space: nowrap;
+    align-self: flex-start;
 }
 
 .waveform {
@@ -267,6 +273,8 @@ button:active {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
     margin-top: 6px;
 }
 
@@ -277,6 +285,7 @@ button:active {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    white-space: nowrap; /* 札の中では折り返さない(狭幅では札ごと折り返す) */
     padding: 3px 10px;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -324,6 +333,7 @@ button:active {
     font-family: 'Courier New', Courier, monospace;
     font-size: 14px;
     font-weight: bold;
+    white-space: nowrap;
     color: rgba(255, 255, 255, 0.85);
     pointer-events: none;
     padding-right: 5px;
@@ -360,7 +370,7 @@ button:active {
     width: 100%;
     text-align: center;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Sans font */
-    font-size: 120px;
+    font-size: clamp(48px, 19vw, 120px); /* 幅632px以上では従来どおり120px、狭幅では追従して縮む */
     font-weight: bold;
     color: #ffffff;
     background-color: transparent; /* Use existing background */
@@ -386,6 +396,7 @@ button:active {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
 body.hide-badges .badges-wrapper {
@@ -396,7 +407,9 @@ body.hide-badges .badges-wrapper {
 .global-scene-status {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;    /* 狭幅ではPLAYING/STANDBYセクションを縦積みにする */
     gap: 20px;
+    row-gap: 8px;
     background-color: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -450,6 +463,7 @@ body.hide-badges .badges-wrapper {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    white-space: nowrap; /* 札の中では折り返さない(狭幅では札ごと折り返す) */
 }
 
 .global-scene-status .scene-badge.status-empty {
