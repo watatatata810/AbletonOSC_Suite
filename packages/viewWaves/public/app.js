@@ -14,7 +14,7 @@ function updateEmptyState() {
     const emptyMsg = document.getElementById('empty-state-message');
     if (!emptyMsg) return;
     
-    const hasVisibleTrack = document.querySelector('.track-box.visible');
+    const hasVisibleTrack = document.querySelector('.track-box.visible:not(.user-hidden)');
     if (hasVisibleTrack) {
         emptyMsg.classList.add('hidden');
     } else {
@@ -57,6 +57,65 @@ if (syncButton) {
 // Track state
 // key: trackId, value: { ws, containerEl }
 const tracks = {};
+
+// ==========================================
+// トラック表示設定（メニューから切替、localStorage で永続化）
+// ==========================================
+// 再生状態を表す .visible とは独立に、ユーザー設定の .user-hidden で表示を抑制する。
+// 音声のロードやシーンバッジの構成は従来通り動くため、隠したトラックのクリップも
+// STANDBY/PLAYING の判定には寄与し続ける（表示だけを隠す）。
+const HIDDEN_TRACKS_STORAGE_KEY = 'viewwaves.hiddenTracks';
+
+const hiddenTracks = new Set((() => {
+    try {
+        const stored = JSON.parse(localStorage.getItem(HIDDEN_TRACKS_STORAGE_KEY));
+        return Array.isArray(stored) ? stored.filter(Number.isInteger) : [];
+    } catch (e) {
+        return [];
+    }
+})());
+
+const trackVisibilityList = document.getElementById('track-visibility-list');
+
+function setTrackHidden(trackId, hidden) {
+    if (hidden) {
+        hiddenTracks.add(trackId);
+    } else {
+        hiddenTracks.delete(trackId);
+    }
+    localStorage.setItem(HIDDEN_TRACKS_STORAGE_KEY, JSON.stringify([...hiddenTracks]));
+
+    const t = tracks[trackId];
+    if (t) {
+        t.boxEl.classList.toggle('user-hidden', hidden);
+    }
+    sortVisibleTracks();
+    updateEmptyState();
+}
+
+function renderTrackVisibilityList() {
+    if (!trackVisibilityList) return;
+
+    trackVisibilityList.innerHTML = '';
+    const trackIds = Object.keys(tracks).map(Number).sort((a, b) => a - b);
+
+    trackIds.forEach(trackId => {
+        const label = document.createElement('label');
+        label.className = 'track-visibility-item';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = !hiddenTracks.has(trackId);
+        checkbox.addEventListener('change', (e) => setTrackHidden(trackId, !e.target.checked));
+
+        const name = document.createElement('span');
+        name.textContent = `${trackId + 1}. ${tracks[trackId].trackName}`;
+
+        label.appendChild(checkbox);
+        label.appendChild(name);
+        trackVisibilityList.appendChild(label);
+    });
+}
 
 /**
  * トラック1つぶんのリソースを完全に解放する。
@@ -223,7 +282,8 @@ function updateLayerBadgesUI(trackId) {
  * 表示中のトラックを曲時間（短い順）でソートして再配置する
  */
 function sortVisibleTracks() {
-    const visibleTracks = Object.values(tracks).filter(t => t.boxEl.classList.contains('visible'));
+    const visibleTracks = Object.values(tracks).filter(t =>
+        t.boxEl.classList.contains('visible') && !t.boxEl.classList.contains('user-hidden'));
     
     visibleTracks.sort((a, b) => {
         const durA = (a.ws && a.ws.getDuration() > 0) ? a.ws.getDuration() : Infinity;
@@ -677,6 +737,11 @@ function getOrCreateTrackUI(trackId) {
     wsB.on('ready', makeOnReady('B', wsB));
     wsC.on('ready', makeOnReady('C', wsC));
 
+    if (hiddenTracks.has(trackId)) {
+        box.classList.add('user-hidden');
+    }
+    renderTrackVisibilityList();
+
     return tracks[trackId];
 }
 
@@ -1009,6 +1074,7 @@ socket.on('track_name', (data) => {
     const t = getOrCreateTrackUI(trackId);
     t.trackName = name;
     updateTrackTitle(trackId);
+    renderTrackVisibilityList();
 });
 
 socket.on('selected_scene_changed', (data) => {

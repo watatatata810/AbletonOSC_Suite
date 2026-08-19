@@ -342,6 +342,9 @@ let currentTempo = 120.0;
 // スタンバイ中のシーンは名前が付いていても "Scene N" と表示されていた。
 // 起動時に一括取得して全シーンぶん保持する。
 let sceneNames = {};
+// トラック名も同様に保持する（接続直後のクライアントに一括で渡し、
+// メニューのトラック表示リストとトラックタイトルを名前ありで初期化する）
+let trackNames = {};
 let serverIsPlaying = false;
 let selectedSceneIndex = -1;
 let selectedSceneTimer = null;
@@ -510,9 +513,10 @@ setInterval(() => {
             for (const key in playingSlots) delete playingSlots[key];
             for (const key in activeClips) delete activeClips[key];
             clipLengths = {};
-            // 別プロジェクトが開かれた可能性があるため、シーン名も捨てる
+            // 別プロジェクトが開かれた可能性があるため、シーン名・トラック名も捨てる
             // （古い名前を出し続けるより "Scene N" のほうが誤解が無い）
             sceneNames = {};
+            trackNames = {};
             
             // 完全タイムアウト：画面をクリアさせる（reset: true）
             io.emit('ableton_status', { connected: false, reset: true });
@@ -660,6 +664,7 @@ function handleAbletonOscMessage(msg) {
     else if (address === '/live/track/get/name') {
         const trackId = args[0];
         const name = args[1];
+        trackNames[trackId] = name;
         io.emit('track_name', { trackId, name });
     }
     else if (address === '/live/song/get/is_playing' || address === '/live/song/is_playing') {
@@ -1005,6 +1010,12 @@ io.on('connection', (socket) => {
     if (Object.keys(sceneNames).length > 0) {
         socket.emit('scene_names', sceneNames);
     }
+
+    // 取得済みのトラック名も渡す（リロード後もメニューのトラック一覧と
+    // トラックタイトルを名前ありで初期化できるようにする）
+    for (const trackId in trackNames) {
+        socket.emit('track_name', { trackId: parseInt(trackId, 10), name: trackNames[trackId] });
+    }
     
     // ブラウザ接続直後に、サーバーが保持している現在の再生状態を即座に同期する
     // (OSCの冗長更新を弾くようにしたため、新規接続クライアントにはキャッシュを送信する必要がある)
@@ -1041,6 +1052,7 @@ io.on('connection', (socket) => {
         for (const key in activeClips) delete activeClips[key];
         clipLengths = {};
         sceneNames = {};
+        trackNames = {};
         
         // 再取得シーケンスの開始
         oscClient.send('/live/song/get/num_tracks');

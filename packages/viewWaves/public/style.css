@@ -100,6 +100,30 @@ body.status-disconnected {
     cursor: pointer;
 }
 
+#track-visibility-list {
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.track-visibility-item {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.track-visibility-item input[type="checkbox"] {
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.track-visibility-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Header styles removed */
 
 .controls {
@@ -166,8 +190,13 @@ button:active {
     padding-bottom: 10px;
 }
 
+/* ユーザーがメニューから非表示に設定したトラック（再生状態の .visible とは独立） */
+.track-box.user-hidden {
+    display: none;
+}
+
 /* 複数のトラックが表示される場合、2つ目以降の表示トラックの上にだけマージンをつける */
-.track-box.visible ~ .track-box.visible {
+.track-box.visible:not(.user-hidden) ~ .track-box.visible:not(.user-hidden) {
     margin-top: 20px;
 }
 
