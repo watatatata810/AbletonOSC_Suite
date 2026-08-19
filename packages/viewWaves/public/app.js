@@ -724,8 +724,11 @@ function getOrCreateTrackUI(trackId) {
             ws.zoom(t.currentZoom);
         }
 
-        // ロード完了時にアクティブなレイヤーであれば、初期ズームとスクロール位置を適用する
+        // ロード完了時にアクティブなレイヤーであれば、描画対象を確実にこのレイヤーへ
+        // 向けてから初期ズームとスクロール位置を適用する
+        // (デコード完了前のスワップ等でWebGL側の切替が漏れていても、ここで追いつく)
         if (t.activeLayerKey === layerKey) {
+            webglWaveform.setActiveLayer(layerKey);
             syncWebGLView(trackId);
         }
 
@@ -825,13 +828,16 @@ socket.on('clip_playing', (data) => {
         
         t.activeLayerKey = swapTargetKey;
         t.layers[swapTargetKey].slotIndex = slotIndex;
-        
+
+        // WebGL の描画対象レイヤーはデコード状況に関わらず即座に切り替える。
+        // デコード完了前にスワップした場合、ここで切り替えておかないと
+        // ready 後の updateData が非アクティブレイヤー扱いで描画されず、
+        // プレイヘッドだけ動いて波形が空のままになる
+        t.webglWaveform.setActiveLayer(swapTargetKey);
+
         // 新しくアクティブになった WaveSurfer に現在のズーム倍率を適用
         if (t.ws && t.ws.getDecodedData()) {
             t.ws.zoom(t.currentZoom === 0 ? false : t.currentZoom);
-            // WebGL側は事前に転送（プリレンダリング）が完了しているため、アクティブレイヤーをスワップするだけで完了
-            t.webglWaveform.setActiveLayer(swapTargetKey);
-            
             // スワップ直後に最新のズームとスクロール位置をWebGLに同期する
             syncWebGLView(trackId);
         }
