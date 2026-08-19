@@ -1302,10 +1302,17 @@ function updateGlobalSceneStatus() {
     }
 
     // 2. スタンバイ中シーン一覧の描画
-    // 再生中以外のロード済みシーンを昇順でソート
+    // ロード済みシーンのうち「意図された次候補」だけを表示する:
+    // グローバル再生シーンの次 と、Live で選択中のシーン。
+    // 過去の選択の残骸 (一部トラックのレイヤーに残った古いプリロード) は表示しない。
+    // レイヤー自体は破棄しないので、残骸シーンを再発火した場合の瞬時スワップは従来通り効く。
+    const standbyCandidates = new Set();
+    if (activePlayingSceneIndex >= 0) standbyCandidates.add(activePlayingSceneIndex + 1);
+    if (selectedSceneIndex >= 0) standbyCandidates.add(selectedSceneIndex);
+
     const standbySlots = Object.keys(loadedScenesMap)
         .map(Number)
-        .filter(slot => slot !== activePlayingSceneIndex)
+        .filter(slot => slot !== activePlayingSceneIndex && standbyCandidates.has(slot))
         .sort((a, b) => a - b);
 
     standbyContainer.innerHTML = '';
