@@ -307,9 +307,16 @@ function sortVisibleTracks() {
  */
 const REQUIRED_WAVESURFER_INTERNALS = [
     'reRender',          // ズーム時のスクロール自動補正をスキップするために差し替える
-    'render',            // パッチ版 reRender から直接呼ぶ
+    'render',            // 通常経路の reRender が内部で呼ぶ (差し替え検知用)
     'scrollIntoView',    // 自前でカーソル制御するため無効化する
-    'unsubscribeOnScroll' // パッチ版 reRender でリスナーを解除する
+    'unsubscribeOnScroll', // パッチ版 reRender でリスナーを解除する
+    // 以下はズーム時の軽量ジオメトリ更新 (パッチ版 reRender) が参照する
+    'wrapper',           // ラッパー幅の書き換え先
+    'scrollContainer',   // 親幅・overflow の更新先
+    'options',           // minPxPerSec / fillParent の参照元
+    'containerInlinePadding', // 親幅からパディングを除くため
+    'isScrollable',      // スクロール可否フラグの更新先 (renderProgress が参照)
+    'audioData'          // duration の参照元 (未ロード時は null)
 ];
 
 let waveSurferInternalsChecked = false;
@@ -360,11 +367,28 @@ function patchReRenderForZoom(ws) {
 
     renderer.reRender = function () {
         if (this._skipScrollCorrection) {
-            // スクロール補正なしで再描画だけ行う
+            // ズーム操作中はスクロール自動補正に加えて、キャンバスのピクセル描画
+            // (renderChannel) も丸ごと省く。WaveSurfer のキャンバスは
+            // waveColor: transparent で不可視 (表示は WebGL 側が担当) なのに、
+            // 表示範囲が大きいと全サンプルの min/max 計算に1ステップ 40ms 級を
+            // 費やし、フィット付近のズームの引っかかりの原因になっていた
+            // (2026-08-20 実測: フィット付近 38-48ms / WebGL 側は 0.1ms)。
+            //
+            // ここでは本家 render() のジオメトリ更新部分だけを行う (v7.12.8 の
+            // calculateWaveformLayout の式を複製)。スクロール補正・カーソル・
+            // オーバーレイはラッパー幅と isScrollable にのみ依存するため、
+            // これだけで整合する。キャンバスは古い倍率のまま残るが不可視で、
+            // 次の通常再レンダリング (ロード・リサイズ) で描き直される。
             this.unsubscribeOnScroll.forEach(fn => fn());
             this.unsubscribeOnScroll = [];
             if (!this.audioData) return;
-            this.render(this.audioData);
+
+            const parentWidth = this.scrollContainer.clientWidth - (this.containerInlinePadding || 0);
+            const scrollWidth = Math.ceil(this.audioData.duration * (this.options.minPxPerSec || 0));
+            this.isScrollable = scrollWidth > parentWidth;
+            const useParentWidth = Boolean(this.options.fillParent && !this.isScrollable);
+            this.wrapper.style.width = useParentWidth ? '100%' : `${scrollWidth}px`;
+            this.scrollContainer.style.overflowX = this.isScrollable ? 'auto' : 'hidden';
         } else {
             origReRender();
         }
