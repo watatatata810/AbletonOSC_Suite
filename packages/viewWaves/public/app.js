@@ -169,6 +169,12 @@ function resetAllTracksUI() {
 let isSongPlaying = false;
 let selectedSceneIndex = -1;
 
+// 最後に「音声のあるシーン」を選択した時のシーン番号 (=最後にキューした曲)。
+// STANDBY 表示の候補に使う。選択が空シーン (曲間のスペーサー) に移っても
+// キューした曲を表示し続けるため、選択そのものではなく
+// 音声プリロードが発生した選択を覚えておく。
+let lastCuedSceneIndex = -1;
+
 // ==========================================
 // 純粋関数群 (Pure Functions)
 // ==========================================
@@ -1131,12 +1137,15 @@ socket.on('clip_preload', (data) => {
 
 socket.on('clip_selected_preload', (data) => {
     const { trackId, slotIndex, filePath } = data;
-    
+
     if (selectedSceneIndex !== slotIndex) return;
-    
+
+    // 音声のあるシーンが選択された = キューされた
+    lastCuedSceneIndex = slotIndex;
+
     const url = `/audio?path=${encodeURIComponent(filePath)}`;
     const t = getOrCreateTrackUI(trackId);
-    
+
     let exists = false;
     Object.keys(t.layers).forEach(key => {
         if (t.layers[key].url === url) {
@@ -1146,6 +1155,7 @@ socket.on('clip_selected_preload', (data) => {
     });
     if (exists) {
         updateLayerBadgesUI(trackId);
+        updateGlobalSceneStatus();
         return;
     }
     
@@ -1303,12 +1313,15 @@ function updateGlobalSceneStatus() {
 
     // 2. スタンバイ中シーン一覧の描画
     // ロード済みシーンのうち「意図された次候補」だけを表示する:
-    // グローバル再生シーンの次 と、Live で選択中のシーン。
+    // グローバル再生シーンの次 / Live で選択中のシーン / 最後にキューした曲。
+    // 選択中に加えて「最後にキューした曲」を残すのは、選択が空シーン
+    // (曲間のスペーサー) に移った瞬間にスタンバイ表示が消えるのを防ぐため。
     // 過去の選択の残骸 (一部トラックのレイヤーに残った古いプリロード) は表示しない。
     // レイヤー自体は破棄しないので、残骸シーンを再発火した場合の瞬時スワップは従来通り効く。
     const standbyCandidates = new Set();
     if (activePlayingSceneIndex >= 0) standbyCandidates.add(activePlayingSceneIndex + 1);
     if (selectedSceneIndex >= 0) standbyCandidates.add(selectedSceneIndex);
+    if (lastCuedSceneIndex >= 0) standbyCandidates.add(lastCuedSceneIndex);
 
     const standbySlots = Object.keys(loadedScenesMap)
         .map(Number)
