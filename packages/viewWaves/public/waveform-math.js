@@ -38,9 +38,12 @@
         let startPct = 0;
         let endPct = 1;
 
-        // AbletonOSCの仕様対応：非ループ時でもエンドポイントを動かすとloop_endが変化するため、
-        // isLoopingのON/OFFに関わらず「より手前にあるマーカー」を常に実質的なエンドとする
-        const actualEnd = (markerData.loopEnd !== undefined && markerData.loopEnd < markerData.endMarker)
+        // Live の実効再生終端は looping の ON/OFF に関わらず常に loop_end
+        // (length は常に loop_end に追従し、エンドポイントのドラッグで動くのも loop_end のみ。
+        //  end_marker は取り残されて end_marker < loop_end の逆転も起き得るため、
+        //  min() で比較すると古い end_marker に固定される。
+        //  実測: docs/260819-2334_endpoint-freeze-investigation.md)
+        const actualEnd = markerData.loopEnd !== undefined
             ? markerData.loopEnd
             : markerData.endMarker;
 

@@ -61,17 +61,27 @@ describe('calculateMarkerPercentages', () => {
         assert.equal(r.endPct, 0.75);
     });
 
-    test('loopEnd が endMarker より手前ならそちらを実質の終端にする', () => {
-        // AbletonOSC は非ループ時でもエンドポイント操作で loop_end が動くため
+    test('loopEnd があれば常にそれを実質の終端にする', () => {
+        // Live の実効再生終端は looping に関わらず loop_end（エンドポイント操作で動くのも loop_end のみ）
         const r = calculateMarkerPercentages(
             { isWarped: false, startMarker: 0, endMarker: 60, loopEnd: 30 }, 60
         );
         assert.equal(r.endPct, 0.5);
     });
 
-    test('loopEnd が endMarker より後ろなら endMarker を使う', () => {
+    test('endMarker が loopEnd より手前に取り残されていても loopEnd を使う（凍結バグ修正）', () => {
+        // Seg. BPM 操作後などに end_marker < loop_end の逆転が起きることがあり、
+        // min() で比較すると古い end_marker に表示が固定される
+        // (docs/260819-2334_endpoint-freeze-investigation.md)
         const r = calculateMarkerPercentages(
-            { isWarped: false, startMarker: 0, endMarker: 30, loopEnd: 60 }, 60
+            { isWarped: false, startMarker: 0, endMarker: 15, loopEnd: 30 }, 60
+        );
+        assert.equal(r.endPct, 0.5);
+    });
+
+    test('loopEnd が無ければ endMarker にフォールバックする', () => {
+        const r = calculateMarkerPercentages(
+            { isWarped: false, startMarker: 0, endMarker: 30 }, 60
         );
         assert.equal(r.endPct, 0.5);
     });
