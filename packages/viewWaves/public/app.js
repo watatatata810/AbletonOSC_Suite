@@ -288,18 +288,14 @@ function updateLayerBadgesUI(trackId) {
  * 表示中のトラックを曲時間（短い順）でソートして再配置する
  */
 function sortVisibleTracks() {
-    const visibleTracks = Object.values(tracks).filter(t =>
-        t.boxEl.classList.contains('visible') && !t.boxEl.classList.contains('user-hidden'));
-    
-    visibleTracks.sort((a, b) => {
-        const durA = (a.ws && a.ws.getDuration() > 0) ? a.ws.getDuration() : Infinity;
-        const durB = (b.ws && b.ws.getDuration() > 0) ? b.ws.getDuration() : Infinity;
-        return durA - durB;
-    });
-    
+    // 表示順はトラック番号の昇順 (Live のトラック並びと同じ)
+    const visibleTracks = Object.entries(tracks)
+        .filter(([, t]) => t.boxEl.classList.contains('visible') && !t.boxEl.classList.contains('user-hidden'))
+        .sort(([a], [b]) => Number(a) - Number(b));
+
     // appendChildでDOMを移動するとCSSアニメーションがキャンセルされてしまうため、
     // Flexboxの order プロパティを使用して見た目の順序だけを変更する
-    visibleTracks.forEach((t, index) => {
+    visibleTracks.forEach(([, t], index) => {
         t.boxEl.style.order = index;
     });
 }
