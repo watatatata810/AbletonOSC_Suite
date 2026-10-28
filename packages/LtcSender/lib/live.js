@@ -114,6 +114,29 @@ class Live extends EventEmitter {
         });
     }
 
+    /**
+     * 複数の問い合わせを 1 つのバンドルで送る。AbletonOSC は同じ処理の中で答えるので、
+     * 複数クリップの再生位置を「同じ瞬間の値」として比べられる。
+     * @param {Array<[string, ...any]>} requests
+     * @returns {Promise<Array<any[]|null>>} 各問い合わせの返信 (送った引数を除く)。届かなければ null
+     */
+    queryBundle(requests) {
+        const waits = requests.map(([address, ...args]) => new Promise((resolve) => {
+            const p = {
+                match: (addr, got) => addr === address && args.every((a, i) => got[i] === a),
+                resolve: (got) => resolve(got === null ? null : got.slice(args.length)),
+                timer: null
+            };
+            p.timer = setTimeout(() => {
+                this.pending.delete(p);
+                resolve(null);
+            }, this.timeout);
+            this.pending.add(p);
+        }));
+        this.sendBundle(requests);
+        return Promise.all(waits);
+    }
+
     /** 1 つの値だけ返る問い合わせ。無ければ fallback */
     async value(address, args = [], fallback = null) {
         const got = await this.query(address, ...args);
@@ -177,6 +200,26 @@ class Live extends EventEmitter {
     async getSceneTracks(scene, trackCount) {
         const has = await Promise.all(Array.from({ length: trackCount }, (_, t) => this.hasClip(t, scene)));
         return has.map((h, t) => (h ? t : -1)).filter((t) => t >= 0);
+    }
+
+    /**
+     * 複数クリップの再生位置と再生中かを、同じ瞬間の値で読む
+     * @param {Array<[number, number]>} clips - [track, clip] の一覧
+     * @returns {Promise<Array<{track:number, clip:number, position:number|null, isPlaying:boolean|null}>>}
+     */
+    async getPositions(clips) {
+        const requests = [];
+        for (const [t, c] of clips) {
+            requests.push(['/live/clip/get/playing_position', t, c]);
+            requests.push(['/live/clip/get/is_playing', t, c]);
+        }
+        const res = await this.queryBundle(requests);
+        return clips.map(([t, c], i) => ({
+            track: t,
+            clip: c,
+            position: res[i * 2] ? res[i * 2][0] : null,
+            isPlaying: res[i * 2 + 1] ? res[i * 2 + 1][0] : null
+        }));
     }
 
     /** 再生位置の通知を受け始める (止めない。osc-router 経由で他のパッケージにも届く) */
