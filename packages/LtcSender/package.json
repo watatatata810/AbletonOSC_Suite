@@ -1,0 +1,19 @@
+{
+  "name": "ltcsender",
+  "version": "1.0.0",
+  "description": "Ableton Live で鳴らす LTC 音声ファイルの作成・監視・途中再生ツール",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "node-osc": "^11.5.0",
+    "socket.io": "^4.8.3"
+  }
+}
