@@ -1,5 +1,6 @@
 const http = require('http');
-const { spawn } = require('child_process');
+const crypto = require('crypto');
+const { spawn, exec } = require('child_process');
 const path = require('path');
 const os = require('os');
 const kill = require('tree-kill');
@@ -231,6 +232,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/status') {
     const statusData = {
+      // 画面が、自分のウィンドウの launcher-service と話しているかを確かめるため
+      service: { pid: process.pid },
       localIp: getLocalIP(),
       packages: packagesList.map(pkg => ({
         name: pkg.name,
@@ -304,29 +307,183 @@ const server = http.createServer(async (req, res) => {
   res.end();
 });
 
-server.listen(PORT, () => {
-  logToFile(`[Launcher Extension] HTTP API Server running on port ${PORT}`);
+// --- ポート 3020 の取り合い ---
+// 前回のランチャーの launcher-service が残っていると、ポート 3020 を使えない。
+// 黙って落ちると、画面は残っている古いサービス (古い config.json の内容) につながってしまうため、
+// 古いサービスの PID と、その下で動いているパッケージを調べて画面に知らせる。
+// 入れ替えは、画面で確認して「止めて入れ替える」を押した時だけ行う (本番中に勝手に止めないため)。
+let serviceState = { mode: 'starting' }; // starting | ok | conflict | replacing
+
+const execText = (command) => new Promise((resolve) => {
+  exec(command, { windowsHide: true, timeout: 10000 }, (err, stdout) => resolve(err ? '' : stdout));
 });
 
-// Poka-Yoke: プロセス親終了時のクリーンアップ
-function cleanup() {
-  shuttingDown = true; // 終了処理中の close イベントで自動再起動しないようにする
-  logToFile('[Launcher Extension] Cleaning up child processes...');
-  const keys = Object.keys(runningProcesses);
-  for (const key of keys) {
-    if (runningProcesses[key]?.status === 'running') {
-      logToFile(`Killing ${key} (PID: ${runningProcesses[key].pid})`);
-      try {
-        kill(runningProcesses[key].pid, 'SIGKILL');
-      } catch (e) {
-        logToFile(`Error killing ${key}: ` + e.message);
-      }
-    }
+/** ポートで待ち受けているプロセスの PID (Windows の netstat を読む)。見つからなければ null */
+async function findListeningPid(port) {
+  const out = await execText('netstat -ano -p tcp');
+  for (const line of out.split(/\r?\n/)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length >= 5 && cols[1].endsWith(`:${port}`) && cols[3] === 'LISTENING') return Number(cols[4]);
   }
+  return null;
+}
+
+async function getCommandLine(pid) {
+  const out = await execText(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine"`);
+  return out.trim();
+}
+
+/** 残っている古いサービスの /status (動いているパッケージを知るため) */
+function fetchOldStatus() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port: PORT, path: '/status', timeout: 2000 }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch (e) { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+async function detectConflict() {
+  const pid = await findListeningPid(PORT);
+  const commandLine = pid ? await getCommandLine(pid) : '';
+  const old = await fetchOldStatus();
+  const running = old ? old.packages.filter(p => p.status === 'running').map(p => p.name) : [];
+  serviceState = {
+    mode: 'conflict',
+    pid,
+    commandLine,
+    isLauncherService: commandLine.includes('launcher-service'),
+    running
+  };
+  logToFile(`[Launcher Extension] Port ${PORT} is in use by PID ${pid} (${commandLine}). Running under it: ${running.join(', ') || 'none'}`);
+  broadcastState();
+}
+
+function listen() {
+  server.listen(PORT, () => {
+    serviceState = { mode: 'ok', pid: process.pid };
+    logToFile(`[Launcher Extension] HTTP API Server running on port ${PORT}`);
+    broadcastState();
+  });
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    detectConflict().catch(e => logToFile('[Launcher Extension] Failed to inspect port conflict: ' + e.message));
+    return;
+  }
+  logToFile('[Launcher Extension] HTTP server error: ' + err.message);
+});
+
+/** 画面で確認された時だけ呼ぶ。古いサービスをパッケージごと止めて、ポート 3020 を引き継ぐ */
+async function replaceStaleService() {
+  if (serviceState.mode !== 'conflict') return;
+  const { pid, isLauncherService } = serviceState;
+  if (!pid || !isLauncherService) {
+    // launcher-service 以外のプロセスがポートを使っている時は止めない
+    logToFile(`[Launcher Extension] Refusing to stop PID ${pid}: not a launcher-service process`);
+    broadcastState({ error: `ポート ${PORT} を使っているのはランチャーの処理ではないため、止めませんでした (PID ${pid})` });
+    return;
+  }
+  serviceState = { ...serviceState, mode: 'replacing' };
+  broadcastState();
+  logToFile(`[Launcher Extension] Stopping stale launcher-service (PID ${pid}) and its packages...`);
+  await new Promise((resolve) => kill(pid, 'SIGKILL', (err) => {
+    if (err) logToFile(`Failed to kill stale launcher-service: ${err.message}`);
+    resolve();
+  }));
+  await sleep(500);
+  listen();
+}
+
+// --- Neutralino との接続 ---
+// Neutralino は終了する時に拡張機能を止めない。拡張機能は WebSocket でつながり、
+// その接続が切れたら (ウィンドウを閉じたら) 自分で終了する必要がある
+// (https://neutralino.js.org/docs/how-to/extensions-overview/)。
+// 接続情報は起動時に標準入力へ JSON で渡される。
+let nlSocket = null;
+let nlAuth = null;
+
+function sendToNeutralino(method, data) {
+  if (!nlSocket || nlSocket.readyState !== 1 || !nlAuth) return;
+  nlSocket.send(JSON.stringify({ id: crypto.randomUUID(), method, accessToken: nlAuth.nlToken, data }));
+}
+
+/** 画面 (main.js) へ今の状態を知らせる */
+function broadcastState(extra = {}) {
+  sendToNeutralino('app.broadcast', { event: 'launcher:state', data: { ...serviceState, ...extra } });
+}
+
+function connectNeutralino(auth) {
+  nlAuth = auth;
+  const url = `ws://localhost:${auth.nlPort}?extensionId=${auth.nlExtensionId}&connectToken=${auth.nlConnectToken}`;
+  if (typeof WebSocket === 'undefined') {
+    logToFile(`[Launcher Extension] WebSocket is not available in Node ${process.version}. The service cannot detect the window closing.`);
+    return;
+  }
+  nlSocket = new WebSocket(url);
+  nlSocket.addEventListener('open', () => {
+    logToFile('[Launcher Extension] Connected to Neutralino');
+    broadcastState();
+  });
+  nlSocket.addEventListener('message', (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch (err) { return; }
+    if (msg.event === 'launcher:hello') broadcastState();
+    else if (msg.event === 'launcher:replaceStale') {
+      replaceStaleService().catch(err => logToFile('[Launcher Extension] Replace failed: ' + err.message));
+    }
+  });
+  nlSocket.addEventListener('close', () => shutdown('Neutralino connection closed'));
+  nlSocket.addEventListener('error', () => logToFile('[Launcher Extension] Neutralino connection error'));
+}
+
+function readNeutralinoAuth() {
+  let buf = '';
+  const onData = (chunk) => {
+    buf += chunk.toString();
+    const nl = buf.indexOf('\n');
+    const text = nl >= 0 ? buf.slice(0, nl) : buf;
+    try {
+      const auth = JSON.parse(text);
+      process.stdin.off('data', onData);
+      connectNeutralino(auth);
+    } catch (e) {
+      // JSON が分割して届いた場合は続きを待つ
+    }
+  };
+  process.stdin.on('data', onData);
+}
+
+// Poka-Yoke: 終了時に、起動したパッケージを止め終えてから終了する
+let shutdownStarted = false;
+async function shutdown(reason) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  shuttingDown = true; // 終了処理中の close イベントで自動再起動しないようにする
+  logToFile(`[Launcher Extension] Shutting down (${reason}). Cleaning up child processes...`);
+  const kills = Object.keys(runningProcesses)
+    .filter(key => runningProcesses[key]?.status === 'running')
+    .map(key => new Promise((resolve) => {
+      logToFile(`Killing ${key} (PID: ${runningProcesses[key].pid})`);
+      kill(runningProcesses[key].pid, 'SIGKILL', (err) => {
+        if (err) logToFile(`Error killing ${key}: ` + err.message);
+        resolve();
+      });
+    }));
+  // 止まらないプロセスがあっても、3 秒で見切って終了する
+  await Promise.race([Promise.all(kills), sleep(3000)]);
   process.exit(0);
 }
 
 // 終了シグナルの検知
-process.on('SIGTERM', cleanup);
-process.on('SIGINT', cleanup);
-process.on('exit', cleanup);
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+readNeutralinoAuth();
+listen();

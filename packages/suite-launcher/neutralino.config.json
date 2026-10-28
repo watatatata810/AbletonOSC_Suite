@@ -17,7 +17,8 @@
   },
   "nativeAllowList": [
     "app.*",
-    "os.*"
+    "os.*",
+    "extensions.*"
   ],
   "extensions": [
     {

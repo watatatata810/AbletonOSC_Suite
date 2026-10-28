@@ -1,3 +1,5 @@
+[hidden] { display: none !important; }
+
 :root {
     --bg-color: #121212;
     --card-bg: #1e1e1e;
@@ -229,4 +231,20 @@ footer {
 
 .console-body.open {
     display: block;
+}
+
+/* 前回のランチャーの処理が残っている時の警告 */
+.service-warning {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background-color: var(--danger-color);
+    color: #fff;
+    font-weight: bold;
+    line-height: 1.5;
+}
+
+.service-warning > div {
+    flex: 1;
 }
