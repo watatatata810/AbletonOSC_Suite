@@ -37,6 +37,15 @@
       "dependencies": ["osc-router"]
     },
     {
+      "name": "LtcSender",
+      "dir": "packages/LtcSender",
+      "type": "node",
+      "startCmd": "server.js",
+      "httpPort": 3002,
+      "oscPort": 11005,
+      "dependencies": ["osc-router"]
+    },
+    {
       "name": "OscTester",
       "dir": "packages/OscTester",
       "type": "node",

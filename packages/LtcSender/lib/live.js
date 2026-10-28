@@ -183,11 +183,13 @@ class Live extends EventEmitter {
         return this.value('/live/clip_slot/get/has_clip', [track, clip], false);
     }
 
-    /** クリップの状態。クリップが無ければ null */
-    async getClipState(track, clip) {
+    /**
+     * クリップの状態。クリップが無ければ null
+     * @param {string[]} [props] - 読むプロパティ (AbletonOSC の名前)。AbletonOSC への負荷を抑えるため必要な分だけ
+     */
+    async getClipState(track, clip, props = ['name', 'is_playing', 'is_triggered', 'playing_position', 'warping',
+        'warp_mode', 'length', 'start_marker', 'end_marker', 'looping', 'file_path', 'sample_length']) {
         if (!(await this.hasClip(track, clip))) return null;
-        const props = ['name', 'is_playing', 'is_triggered', 'playing_position', 'warping', 'warp_mode',
-            'length', 'start_marker', 'end_marker', 'looping', 'file_path', 'sample_length'];
         const values = await Promise.all(props.map((p) => this.value(`/live/clip/get/${p}`, [track, clip])));
         const s = { track, clip };
         props.forEach((p, i) => {

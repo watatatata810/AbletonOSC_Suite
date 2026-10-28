@@ -25,6 +25,10 @@ packages/*/.serena/
 packages/DaihonTrigger/project_data.json
 packages/DaihonTrigger/public/assets/
 
+# LtcSender local ledger
+packages/LtcSender/project_data.json
+packages/LtcSender/project_data.json.*
+
 # Claude temp
 .claude/tmp/
 

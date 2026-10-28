@@ -1,0 +1,110 @@
+:root {
+    --bg: #121417;
+    --panel: #1c1f24;
+    --line: #2e333b;
+    --text: #e6e8eb;
+    --muted: #9aa1ab;
+    --ok: #4caf50;
+    --warn: #ffb300;
+    --error: #f44336;
+    --show: #c62828;
+    --rehearsal: #1565c0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Hiragino Sans", "Meiryo", sans-serif;
+    font-size: 15px;
+    border: 6px solid var(--line);
+}
+
+/* 監視の結果で枠の色を変える (viewWaves と同じ考え方) */
+body.status-ok { border-color: var(--ok); }
+body.status-waiting { border-color: #ff9800; }
+body.status-warn { border-color: var(--warn); }
+body.status-error { border-color: var(--error); animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { border-color: #5a1a17; } }
+
+#topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+}
+
+.mode-btn {
+    font-size: 18px;
+    font-weight: bold;
+    padding: 8px 20px;
+    border: 2px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+}
+.mode-btn.active[data-mode="show"] { background: var(--show); border-color: var(--show); color: #fff; }
+.mode-btn.active[data-mode="rehearsal"] { background: var(--rehearsal); border-color: var(--rehearsal); color: #fff; }
+
+#connection { color: var(--muted); }
+#connection.ok { color: var(--ok); }
+#connection.ng { color: var(--error); font-weight: bold; }
+
+#issues:empty { display: none; }
+#issues { padding: 8px 16px; }
+.issue { padding: 8px 12px; margin: 4px 0; border-radius: 4px; font-weight: bold; }
+.issue.error { background: var(--error); color: #fff; font-size: 18px; }
+.issue.warn { background: var(--warn); color: #111; }
+
+main { padding: 16px; display: grid; gap: 16px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; }
+h2 { margin: 0 0 10px; font-size: 16px; color: var(--muted); font-weight: normal; }
+
+#now-playing { text-align: center; }
+#tc-label { color: var(--muted); }
+#tc-display {
+    font-family: "Consolas", "Menlo", monospace;
+    font-size: clamp(48px, 12vw, 140px);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    line-height: 1.1;
+}
+#tc-display.stale { color: var(--muted); }
+#now-scene { font-size: 18px; }
+
+.row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.row.wrap { flex-wrap: wrap; }
+.grow { flex: 1 1 320px; display: flex; gap: 6px; align-items: center; }
+.grow input { flex: 1; }
+
+input, select, button {
+    font-size: 15px;
+    background: #262a31;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:disabled { opacity: 0.5; cursor: default; }
+.jump-btn { min-width: 72px; }
+#seek-start, #jump-to { font-weight: bold; }
+
+#seek-result.ok { color: var(--ok); }
+#seek-result.ng { color: var(--error); font-weight: bold; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: normal; }
+td input.tc { width: 9em; font-family: "Consolas", monospace; }
+.file-ok { color: var(--ok); }
+.file-ng { color: var(--error); }
+.file-none { color: var(--muted); }
+.hint { color: var(--muted); font-size: 13px; }
