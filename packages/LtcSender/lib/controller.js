@@ -14,6 +14,7 @@ const ltcFiles = require('./ltc-files');
 const seek = require('./seek');
 const { evaluate } = require('./checks');
 const patch = require('./abletonosc-patch');
+const { wavInfo } = require('./wav');
 
 const MONITOR_MS = 1000;
 const STRUCTURE_MS = 5000;
@@ -21,8 +22,8 @@ const DISCONNECT_MS = 3000;
 const VERIFY_WAIT_MS = 500;
 const TC_EMIT_MS = 50;
 // 監視で読むクリップのプロパティ (AbletonOSC への負荷を抑えるため必要な分だけ)
-const MONITOR_PROPS = ['is_playing', 'is_triggered', 'warping', 'warp_mode', 'end_marker', 'file_path'];
-const SEEK_PROPS = ['is_playing', 'is_triggered', 'warping', 'end_marker', 'playing_position'];
+const MONITOR_PROPS = ['is_playing', 'is_triggered', 'warping', 'warp_mode', 'looping', 'loop_end', 'file_path'];
+const SEEK_PROPS = ['is_playing', 'is_triggered', 'warping', 'looping', 'end_marker', 'loop_end', 'playing_position'];
 
 class Controller extends EventEmitter {
     /**
@@ -44,6 +45,7 @@ class Controller extends EventEmitter {
         this.status = null;
         this.active = null; // { scene, cue, bgmTrack, ltcTrack }
         this.lastTcEmit = 0;
+        this.fileSecondsCache = new Map();
         this.timers = [];
         this.busy = false;
     }
@@ -156,7 +158,7 @@ class Controller extends EventEmitter {
             const show = this.show();
             const snapshot = {
                 connected: this.connected(), patchMissing: this.patchMissing, tempo, quantization,
-                show, cue: null, bgm: null, ltc: null, ltcTrack: null, positions: null
+                show, cue: null, bgm: null, ltc: null, ltcTrack: null, startTimes: null
             };
             const extra = [];
             let active = null;
@@ -182,8 +184,9 @@ class Controller extends EventEmitter {
                         ltcIdx >= 0 ? this.live.getClipState(ltcIdx, cue.scene, MONITOR_PROPS) : null
                     ]);
                     if (ltcIdx >= 0 && snapshot.ltc) {
-                        const [b, l] = await this.live.getPositions([[bgmIdx, cue.scene], [ltcIdx, cue.scene]]);
-                        snapshot.positions = { bgm: b.position, ltc: l.position };
+                        snapshot.ltcFileSeconds = this.fileSeconds(snapshot.ltc.filePath);
+                        const [b, l] = await this.live.getStartTimes([[bgmIdx, cue.scene], [ltcIdx, cue.scene]]);
+                        snapshot.startTimes = { bgm: b, ltc: l };
                         this.listenLtc(ltcIdx, cue.scene);
                     }
                     active = { scene: cue.scene, cue, bgmTrack: bgmIdx, ltcTrack: ltcIdx };
@@ -210,6 +213,22 @@ class Controller extends EventEmitter {
         } finally {
             this.busy = false;
         }
+    }
+
+    /** WAV の長さ (秒)。読めなければ null。同じファイルは 1 回だけ読む */
+    fileSeconds(filePath) {
+        if (!filePath) return null;
+        if (!this.fileSecondsCache.has(filePath)) {
+            let seconds = null;
+            try {
+                const info = wavInfo(filePath);
+                seconds = info ? info.seconds : null;
+            } catch (err) {
+                // Live が開いていて読めない等。BPM 違いの確認を省くだけにする
+            }
+            this.fileSecondsCache.set(filePath, seconds);
+        }
+        return this.fileSecondsCache.get(filePath);
     }
 
     /**
@@ -253,10 +272,10 @@ class Controller extends EventEmitter {
         if (bgmIdx < 0) throw new Error(`BGM トラック「${cue.bgmTrack || show.bgmTrack}」が Live にありません`);
         const [tempo, bgm] = await Promise.all([
             this.live.getTempo(),
-            this.live.getClipState(bgmIdx, scene, ['file_path', 'end_marker'])
+            this.live.getClipState(bgmIdx, scene, ['file_path', 'end_marker', 'loop_end'])
         ]);
         if (!bgm) throw new Error(`シーン ${scene + 1} の BGM トラックにクリップがありません`);
-        const duration = ltcFiles.bgmDuration(bgm.filePath, bgm.endMarker, tempo);
+        const duration = ltcFiles.bgmDuration(bgm.filePath, seek.clipEndBeats(bgm), tempo);
         if (!duration) throw new Error('曲の長さが分かりません');
         const made = ltcFiles.createLtcFile({ show, cue, bgmSeconds: duration.seconds });
         this.editLedger((data, s) => cues.upsertCue(s, { scene, ...made, durationSource: duration.source }));
@@ -278,10 +297,12 @@ class Controller extends EventEmitter {
 
     async verifyAfter(clips, targetBeats, tempo) {
         await new Promise((r) => setTimeout(r, VERIFY_WAIT_MS));
-        const positions = await this.live.getPositions(clips.map((c) => [c.track, c.clip]));
+        const pairs = clips.map((c) => [c.track, c.clip]);
+        const positions = await this.live.getPositions(pairs);
+        const startTimes = await this.live.getStartTimes(pairs);
         // 送ってから読み直すまで (待ち時間 + 発音までの遅れ 0.4 秒) に進む分を許す
         const elapsed = seek.secondsToBeats((VERIFY_WAIT_MS + 1000) / 1000, tempo);
-        return { positions, ...seek.verifyPositions(positions, targetBeats, elapsed) };
+        return { positions, startTimes, ...seek.verifyPositions(positions, startTimes, targetBeats, elapsed) };
     }
 
     async startFrom(scene, seconds, confirmed) {
@@ -291,7 +312,8 @@ class Controller extends EventEmitter {
         const plan = seek.planStartFrom({ scene, clips, seconds, tempo });
         if (!plan.ok) return { ok: false, problems: plan.problems };
         await this.live.sendBundle(plan.messages);
-        return { action: 'startFrom', scene, seconds, ...(await this.verifyAfter(clips, plan.beats, tempo)) };
+        const verify = await this.verifyAfter(plan.targets, plan.beats, tempo);
+        return { action: 'startFrom', scene, seconds, skipped: plan.skipped.map((c) => c.track), ...verify };
     }
 
     /**
@@ -307,7 +329,8 @@ class Controller extends EventEmitter {
         const plan = seek.planJump({ clips, referencePosition: ref.position, tempo, ...opts });
         if (!plan.ok) return { ok: false, problems: plan.problems };
         await this.live.sendBundle(plan.messages);
-        return { action: 'jump', scene, ...opts, ...(await this.verifyAfter(clips, plan.targetBeats, tempo)) };
+        const verify = await this.verifyAfter(plan.targets, plan.targetBeats, tempo);
+        return { action: 'jump', scene, ...opts, skipped: plan.skipped.map((c) => c.track), ...verify };
     }
 }
 

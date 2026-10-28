@@ -5,7 +5,9 @@ const seek = require('../lib/seek');
 
 const clip = (over = {}) => ({
     track: 0, clip: 12, isPlaying: true, isTriggered: false, warping: true, warpMode: 3,
-    playingPosition: 960, endMarker: 2907.5, filePath: 'C:\\LTC\\LTC_S013_01-00-00-00.wav', ...over
+    // 実測 (2026-10-28): 726.9 秒の曲で loop_end = 1453.8 拍、end_marker はその 2 倍の 2907.6 拍
+    playingPosition: 960, loopEnd: 1453.75, endMarker: 2907.5, looping: false,
+    filePath: 'C:\\LTC\\LTC_S013_01-00-00-00.wav', ...over
 });
 const base = (over = {}) => ({
     connected: true,
@@ -17,7 +19,9 @@ const base = (over = {}) => ({
     bgm: clip({ warpMode: 0 }),
     ltc: clip({ track: 4 }),
     ltcTrack: { name: 'LTC', mute: false, output: 'Ext. Out' },
-    positions: { bgm: 960, ltc: 960 },
+    // 実測 (2026-10-28): 揃って鳴っている 2 クリップの start_time は同じ値 (-94)
+    startTimes: { bgm: -94, ltc: -94 },
+    ltcFileSeconds: 726.875,
     ...over
 });
 const codes = (s) => evaluate(s).map((i) => i.code);
@@ -32,8 +36,10 @@ test('監視: Live から返信が無い時はそれだけを出す', () => {
 
 test('監視: LTC が鳴っていない / ずれている / クリップが無い', () => {
     assert.ok(codes(base({ ltc: clip({ track: 4, isPlaying: false }) })).includes('LTC_NOT_PLAYING'));
-    assert.ok(codes(base({ positions: { bgm: 960, ltc: 960.01 } })).includes('LTC_OUT_OF_SYNC'));
-    assert.deepEqual(codes(base({ positions: { bgm: 960, ltc: 960.0015 } })), []);
+    // LTC だけ 1 拍ずらすと start_time が 1 違った (実測)
+    assert.ok(codes(base({ startTimes: { bgm: -74, ltc: -75 } })).includes('LTC_OUT_OF_SYNC'));
+    assert.ok(codes(base({ startTimes: { bgm: -94, ltc: -93.99 } })).includes('LTC_OUT_OF_SYNC'));
+    assert.deepEqual(codes(base({ startTimes: { bgm: -94, ltc: -93.9985 } })), []);
     assert.deepEqual(codes(base({ ltc: null })), ['LTC_MISSING']);
     assert.equal(evaluate(base({ ltc: null })).find((i) => i.code === 'LTC_MISSING').level, 'error');
     // BGM が止まっていれば、LTC クリップが無くても警告どまり
@@ -51,7 +57,10 @@ test('監視: Warp・テンポ・クオンタイズ・トラック', () => {
 });
 
 test('監視: LTC クリップの長さがファイルと合わない (BPM 違い) / 別のファイル', () => {
-    assert.ok(codes(base({ ltc: clip({ track: 4, endMarker: 2700 }) })).includes('LTC_RATIO'));
+    // クリップの BPM が 110 だと、ファイルの終わりは 726.875 秒 × 110/60 拍になる
+    assert.ok(codes(base({ ltc: clip({ track: 4, loopEnd: 726.875 * 110 / 60 }) })).includes('LTC_RATIO'));
+    // ループするクリップの loop_end はファイルの終わりではないので判定しない
+    assert.deepEqual(codes(base({ ltc: clip({ track: 4, loopEnd: 100, looping: true }) })), []);
     assert.ok(codes(base({ ltc: clip({ track: 4, filePath: 'C:\\other.wav' }) })).includes('LTC_FILE'));
 });
 
@@ -70,6 +79,25 @@ test('途中から: Warp オフのクリップや曲の長さを超える時刻�
     assert.equal(seek.planStartFrom({ scene: 1, clips: [clip({ warping: false })], seconds: 10, tempo: 120 }).ok, false);
     assert.equal(seek.planStartFrom({ scene: 1, clips: [clip()], seconds: 2000, tempo: 120 }).ok, false);
     assert.equal(seek.planStartFrom({ scene: 1, clips: [], seconds: 10, tempo: 120 }).ok, false);
+});
+
+test('途中から: その時刻より前に鳴り終わるクリップ (20 秒の無音など) は外して鳴らさない', () => {
+    // 2026-10-28 のシーン 13: トラック 2 に 20 秒の無音 (loop_end = end_marker = 40 拍)
+    const silent = clip({ track: 1, loopEnd: 40, endMarker: 40 });
+    const p = seek.planStartFrom({ scene: 12, clips: [clip({ track: 0 }), silent, clip({ track: 4 })], seconds: 480, tempo: 120 });
+    assert.equal(p.ok, true);
+    assert.deepEqual(p.targets.map((c) => c.track), [0, 4]);
+    assert.deepEqual(p.skipped.map((c) => c.track), [1]);
+    assert.equal(p.messages.length, 4);
+    // 10 秒からなら 3 本とも鳴らす
+    assert.equal(seek.planStartFrom({ scene: 12, clips: [clip({ track: 0 }), silent], seconds: 10, tempo: 120 }).targets.length, 2);
+});
+
+test('飛ばす: 鳴り終わったクリップは外す', () => {
+    const p = seek.planJump({ clips: [clip(), clip({ track: 1, isPlaying: false })], referencePosition: 1000, deltaSeconds: -10, tempo: 120 });
+    assert.equal(p.ok, true);
+    assert.deepEqual(p.targets.map((c) => c.track), [0]);
+    assert.deepEqual(p.skipped.map((c) => c.track), [1]);
 });
 
 test('飛ばす: 全クリップを同じ拍数だけ動かす', () => {
@@ -91,10 +119,10 @@ test('飛ばす: 再生待ちのクリップがあれば送らない (命令が�
 });
 
 test('実行後の確認: 揃っていて飛び先にあれば合格', () => {
-    const ok = seek.verifyPositions([{ position: 960.2, isPlaying: true }, { position: 960.2, isPlaying: true }], 960, 1.5);
+    const ok = seek.verifyPositions([{ position: 960.2, isPlaying: true }, { position: 960.25, isPlaying: true }], [-74, -74], 960, 1.5);
     assert.equal(ok.ok, true);
-    const off = seek.verifyPositions([{ position: 960.2, isPlaying: true }, { position: 980.2, isPlaying: true }], 960, 1.5);
+    const off = seek.verifyPositions([{ position: 960.2, isPlaying: true }, { position: 960.2, isPlaying: true }], [-74, -75], 960, 1.5);
     assert.equal(off.ok, false);
-    const notJumped = seek.verifyPositions([{ position: 10, isPlaying: true }], 960, 1.5);
+    const notJumped = seek.verifyPositions([{ position: 10, isPlaying: true }], [-74], 960, 1.5);
     assert.equal(notJumped.ok, false);
 });

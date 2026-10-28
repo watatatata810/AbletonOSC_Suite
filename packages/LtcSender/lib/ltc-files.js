@@ -15,13 +15,13 @@ const SAMPLE_RATE = 48000;
 const MARGIN_SECONDS = 10;
 
 /**
- * 曲の長さ (秒)。WAV ならヘッダーから。読めなければ Live のクリップの終了位置 (拍) から
+ * 曲の長さ (秒)。WAV ならヘッダーから。読めなければ Live のクリップの終わりの位置 (拍) から
  * @param {string|null} filePath - BGM クリップの file_path
- * @param {number|null} endMarkerBeats - BGM クリップの end_marker
+ * @param {number|null} endBeats - BGM クリップの終わりの位置 (seek.clipEndBeats)
  * @param {number} tempo
  * @returns {{seconds:number, source:'wav'|'end_marker'}|null}
  */
-const bgmDuration = (filePath, endMarkerBeats, tempo) => {
+const bgmDuration = (filePath, endBeats, tempo) => {
     if (filePath) {
         try {
             const info = wavInfo(filePath);
@@ -30,7 +30,7 @@ const bgmDuration = (filePath, endMarkerBeats, tempo) => {
             // Live が開いていて読めない等。下の代わりの方法に回す
         }
     }
-    if (endMarkerBeats > 0 && tempo > 0) return { seconds: endMarkerBeats * 60 / tempo, source: 'end_marker' };
+    if (endBeats > 0 && tempo > 0) return { seconds: endBeats * 60 / tempo, source: 'end_marker' };
     return null;
 };
 

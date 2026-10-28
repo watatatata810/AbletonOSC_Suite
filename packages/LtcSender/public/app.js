@@ -232,7 +232,10 @@ const showResult = (res) => {
     const box = $('seek-result');
     if (res.ok) {
         box.className = 'ok';
-        box.textContent = `揃って移動しました (クリップ ${res.positions.length} 本、ずれ ${(res.spread ?? 0).toFixed(4)} 拍)`;
+        const skipped = res.skipped && res.skipped.length
+            ? `。鳴り終わっているため外したトラック: ${res.skipped.map((t) => `${t + 1} ${state.trackNames[t] || ''}`).join(', ')}`
+            : '';
+        box.textContent = `揃って移動しました (クリップ ${res.positions.length} 本、ずれ ${(res.spread ?? 0).toFixed(4)} 拍)${skipped}`;
     } else {
         box.className = 'ng';
         box.textContent = `実行できませんでした: ${(res.problems || []).join(' / ')}`;

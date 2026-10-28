@@ -8,7 +8,7 @@ const path = require('path');
 
 // LOM の Clip.warp_mode
 const WARP_MODE_REPITCH = 3;
-// 2 つのクリップの位置の差の許容 (拍)。120 BPM で 1ms
+// 2 つのクリップの start_time の差の許容 (拍)。120 BPM で 1ms
 const SYNC_TOLERANCE_BEATS = 0.002;
 // LTC クリップの長さとファイル長の食い違いの許容 (比率)
 const RATIO_TOLERANCE = 0.005;
@@ -24,7 +24,8 @@ const issue = (level, code, message) => ({ level, code, message });
  * @param {object|null} s.cue - 今鳴っている (または選ばれている) シーンの台帳
  * @param {object|null} s.bgm / s.ltc - Live.getClipState の戻り値 (クリップが無ければ null)
  * @param {object|null} s.ltcTrack - Live.getTrackState の戻り値
- * @param {object|null} s.positions - { bgm, ltc } を同じ瞬間に読んだ再生位置
+ * @param {object|null} s.startTimes - { bgm, ltc } の start_time (揃っていれば同じ値)
+ * @param {number|null} s.ltcFileSeconds - LTC クリップが鳴らしているファイルの長さ (秒)
  * @returns {Array<{level:string, code:string, message:string}>}
  */
 const evaluate = (s) => {
@@ -56,8 +57,8 @@ const evaluate = (s) => {
     if (bgmPlaying && !s.ltc.isPlaying) {
         out.push(issue('error', 'LTC_NOT_PLAYING', `シーン ${s.cue.scene + 1} の LTC が鳴っていません`));
     }
-    if (bgmPlaying && s.ltc.isPlaying && s.positions && s.positions.bgm !== null && s.positions.ltc !== null) {
-        const diff = Math.abs(s.positions.bgm - s.positions.ltc);
+    if (bgmPlaying && s.ltc.isPlaying && s.startTimes && s.startTimes.bgm !== null && s.startTimes.ltc !== null) {
+        const diff = Math.abs(s.startTimes.bgm - s.startTimes.ltc);
         if (diff > SYNC_TOLERANCE_BEATS) {
             out.push(issue('error', 'LTC_OUT_OF_SYNC', `BGM と LTC の位置が ${(diff * 60 / (s.tempo || 120) * 1000).toFixed(1)}ms ずれています`));
         }
@@ -68,9 +69,11 @@ const evaluate = (s) => {
     if (s.bgm && !s.bgm.warping) {
         out.push(issue('warn', 'BGM_WARP', 'BGM クリップが Warp オフです (途中から再生・飛ばす操作ができません)'));
     }
-    if (s.cue.fileSeconds && s.tempo && s.ltc.endMarker) {
-        const clipSeconds = s.ltc.endMarker * 60 / s.tempo;
-        if (Math.abs(clipSeconds - s.cue.fileSeconds) / s.cue.fileSeconds > RATIO_TOLERANCE) {
+    // ループしないクリップの loop_end はファイルの終わりの拍。クリップの BPM がテンポと同じなら
+    // loop_end × 60 ÷ テンポ = ファイルの長さ (秒) になる。end_marker は実測でその 2 倍の値が返るので使わない
+    if (s.ltcFileSeconds && s.tempo && s.ltc.loopEnd && !s.ltc.looping) {
+        const clipSeconds = s.ltc.loopEnd * 60 / s.tempo;
+        if (Math.abs(clipSeconds - s.ltcFileSeconds) / s.ltcFileSeconds > RATIO_TOLERANCE) {
             out.push(issue('warn', 'LTC_RATIO', 'LTC クリップの BPM が Live のテンポと違う可能性があります (クリップの長さがファイルと合いません)'));
         }
     }

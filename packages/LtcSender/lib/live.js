@@ -205,7 +205,21 @@ class Live extends EventEmitter {
     }
 
     /**
-     * 複数クリップの再生位置と再生中かを、同じ瞬間の値で読む
+     * 複数クリップの start_time (曲全体の時間軸の上で、クリップの位置 0 にあたる拍) を読む。
+     * 再生中は時間がたっても変わらず、揃って鳴っているクリップ同士は同じ値になる。飛ばすとその分変わる。
+     * 再生位置と違い、他のパッケージのリスナーの通知と取り違えないので、同期の判定はこちらで行う
+     * @param {Array<[number, number]>} clips - [track, clip] の一覧
+     * @returns {Promise<Array<number|null>>}
+     */
+    async getStartTimes(clips) {
+        const res = await this.queryBundle(clips.map(([t, c]) => ['/live/clip/get/start_time', t, c]));
+        return res.map((r) => (r ? r[0] : null));
+    }
+
+    /**
+     * 複数クリップの再生位置と再生中かを読む。
+     * 注意: 再生位置はリスナー (viewWaves や LtcSender 自身の start_listen) の通知と同じ形で届くので、
+     * 返信の代わりに少し前の通知を受け取ることがある。厳密な比較には getStartTimes を使う
      * @param {Array<[number, number]>} clips - [track, clip] の一覧
      * @returns {Promise<Array<{track:number, clip:number, position:number|null, isPlaying:boolean|null}>>}
      */
