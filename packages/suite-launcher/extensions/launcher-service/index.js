@@ -364,12 +364,15 @@ async function detectConflict() {
   broadcastState();
 }
 
+// 待ち受けに失敗して listen() をやり直しても、成功時の処理が重ならないよう 1 回だけ登録する
+server.on('listening', () => {
+  serviceState = { mode: 'ok', pid: process.pid };
+  logToFile(`[Launcher Extension] HTTP API Server running on port ${PORT}`);
+  broadcastState();
+});
+
 function listen() {
-  server.listen(PORT, () => {
-    serviceState = { mode: 'ok', pid: process.pid };
-    logToFile(`[Launcher Extension] HTTP API Server running on port ${PORT}`);
-    broadcastState();
-  });
+  server.listen(PORT);
 }
 
 server.on('error', (err) => {
@@ -401,11 +404,49 @@ async function replaceStaleService() {
   listen();
 }
 
-// --- Neutralino との接続 ---
-// Neutralino は終了する時に拡張機能を止めない。拡張機能は WebSocket でつながり、
-// その接続が切れたら (ウィンドウを閉じたら) 自分で終了する必要がある
-// (https://neutralino.js.org/docs/how-to/extensions-overview/)。
+// --- Neutralino との接続と、終了の検知 ---
+// Neutralino は終了する時に拡張機能を止めない (https://neutralino.js.org/docs/how-to/extensions-overview/)。
+// 公式の方法は「WebSocket の接続が切れたら終了する」だが、Windows では Neutralino が終了しても
+// 接続が切れない (Neutralino のソケットのハンドルが、起動された cmd.exe / node に引き継がれていて
+// ソケットが閉じない。2026-10-28 実測: Neutralino 終了後も接続が Established のまま残った)。
+// そのため、Neutralino のプロセスが生きているかを定期的に確かめ、終了していたら止まる。
+// WebSocket が切れた時の終了も念のため残す。
 // 接続情報は起動時に標準入力へ JSON で渡される。
+const PARENT_CHECK_MS = 2000;
+
+async function getParentPid(pid) {
+  const out = await execText(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId"`);
+  const n = Number(out.trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+const isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+};
+
+/** 自分を起動した Neutralino (node ← cmd.exe /c ← neutralino) が終了したら止まる */
+async function watchNeutralinoProcess() {
+  // Windows では cmd.exe /c を間に挟んで起動される。それ以外では直接の親が Neutralino
+  const neutralinoPid = process.platform === 'win32' ? await getParentPid(process.ppid) : process.ppid;
+  if (!neutralinoPid) {
+    logToFile('[Launcher Extension] Could not find the Neutralino process. The service will not stop when the window closes.');
+    return;
+  }
+  const name = await getCommandLine(neutralinoPid);
+  if (!name.includes('neutralino')) {
+    logToFile(`[Launcher Extension] Parent PID ${neutralinoPid} is not Neutralino (${name}). Not watching it.`);
+    return;
+  }
+  logToFile(`[Launcher Extension] Watching Neutralino (PID ${neutralinoPid})`);
+  setInterval(() => {
+    if (!isAlive(neutralinoPid)) shutdown(`Neutralino (PID ${neutralinoPid}) exited`);
+  }, PARENT_CHECK_MS);
+}
 let nlSocket = null;
 let nlAuth = null;
 
@@ -486,4 +527,5 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 readNeutralinoAuth();
+watchNeutralinoProcess().catch(e => logToFile('[Launcher Extension] Failed to watch Neutralino: ' + e.message));
 listen();
