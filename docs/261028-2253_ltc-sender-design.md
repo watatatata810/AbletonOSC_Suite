@@ -25,6 +25,9 @@ LTC をツールがその場で作って出す方式 (ClipSMPTE 型) は採ら�
 | 「再生待ち」のクリップ | `is_playing=False` / `is_triggered=True` のクリップには move_playing_pos がエラーなしで無視される |
 | Warp オフのクリップ | move_playing_pos で飛ばせない (LOM の仕様) |
 | Start を再生中に変える | 再生位置も変わってしまう (ユーザーの経験) ので、Start の書き換えは使わない |
+| 揃っているかの判定 | `start_time` (曲全体の時間軸上でクリップの位置 0 にあたる拍) で比べる。再生中は一定で、揃っていれば同じ値、飛ばすとその分変わる。`playing_position` はリスナーの通知と取り違えて 100ms の誤差が出た |
+| クリップの終わり | ループしないクリップの `loop_end` がファイルの終わり (拍 = 秒 × 2)。長い曲のクリップでは `end_marker` がその 2 倍の値で返る (20 秒の無音のクリップでは同じ値) |
+| 短いクリップ | シーン 13 には 20 秒の無音のクリップも入っている。途中から再生する時、その時刻より前に鳴り終わるクリップは外す |
 | AbletonOSC | 上流 (ideoforms/AbletonOSC、最終 push 2025-11-19) には move_playing_pos / scrub / stop_scrub が無い。`abletonosc/clip.py` の `methods` に 3 行足すと使える (手元は追加済み、元は `clip.py.bak-20261028`) |
 
 ## 3. 全体の構成
