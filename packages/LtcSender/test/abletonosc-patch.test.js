@@ -84,7 +84,8 @@ test('checkFile: ファイルが無ければ全部足りない扱い', () => {
 });
 
 // ---- osc_server.py (Windows の WSAECONNRESET 対策) ----
-const UPSTREAM_OSC_SERVER = fs.readFileSync(path.join(__dirname, 'fixtures', 'abletonosc-osc_server.py'), 'utf-8');
+// git の改行コード変換 (core.autocrlf) で CRLF になっていても同じ試験になるよう LF に揃える
+const UPSTREAM_OSC_SERVER = fs.readFileSync(path.join(__dirname, 'fixtures', 'abletonosc-osc_server.py'), 'utf-8').replace(/\r\n/g, '\n');
 
 test('osc_server.py: 上流版には 2 つとも当たっていない', () => {
     assert.deepEqual(patch.missingOscServerPatches(UPSTREAM_OSC_SERVER), ['osc_server:recv_reset', 'osc_server:send_reset']);
