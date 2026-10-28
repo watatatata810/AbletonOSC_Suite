@@ -335,6 +335,11 @@ startOscServer(10); // 最大5秒間（500ms x 10回）リトライする
 
 let numTracks = 0;
 const playingSlots = {}; // key: trackId, value: slotIndex
+// file_path の返信で最後に送った clip_playing (key: trackId, value: "slotIndex|filePath")。
+// AbletonOSC の返信は osc-router が全パッケージに配るため、他のパッケージ (LtcSender 等) が
+// 同じクリップの file_path を問い合わせるたびに clip_playing を送り直すと、画面の波形が
+// 毎回アニメーションしてしまう。同じ再生中のクリップへの 2 回目以降は送らない
+const lastPlayingEmit = {};
 let clipLengths = {}; // { "trackId_slotIndex": length, "trackId_slotIndex_start": startMarker, ... }
 let currentTempo = 120.0;
 // シーン名のキャッシュ（key: sceneIndex, value: name）。
@@ -512,6 +517,7 @@ setInterval(() => {
             numTracks = 0;
             for (const key in playingSlots) delete playingSlots[key];
             for (const key in activeClips) delete activeClips[key];
+            for (const key in lastPlayingEmit) delete lastPlayingEmit[key];
             clipLengths = {};
             // 別プロジェクトが開かれた可能性があるため、シーン名・トラック名も捨てる
             // （古い名前を出し続けるより "Scene N" のほうが誤解が無い）
@@ -702,6 +708,9 @@ function handleAbletonOscMessage(msg) {
         }
         
         playingSlots[trackId] = slotIndex;
+        // 再生するスロットが変わったので、次の file_path の返信では必ず clip_playing を送る
+        // (前に鳴らしたシーンに戻った時も、波形を切り替えるため)
+        delete lastPlayingEmit[trackId];
 
         if (slotIndex >= 0) {
             activeClips[trackId] = slotIndex;
@@ -841,12 +850,16 @@ function handleAbletonOscMessage(msg) {
         clipLengths[`${trackId}_${slotIndex}_file_path`] = filePath;
         
         if (playingSlots[trackId] === slotIndex && filePath !== "NO_AUDIO") {
-            // 現在再生中のクリップの場合
-            io.emit('clip_playing', {
-                trackId: trackId,
-                slotIndex: slotIndex,
-                filePath: filePath
-            });
+            // 現在再生中のクリップの場合 (同じクリップ・同じファイルを送り済みなら送らない)
+            const emitKey = `${slotIndex}|${filePath}`;
+            if (lastPlayingEmit[trackId] !== emitKey) {
+                lastPlayingEmit[trackId] = emitKey;
+                io.emit('clip_playing', {
+                    trackId: trackId,
+                    slotIndex: slotIndex,
+                    filePath: filePath
+                });
+            }
         } else if (playingSlots[trackId] === slotIndex - 1 && filePath !== "NO_AUDIO") {
             // 1つ下のクリップ（次のシーン）の場合、プリロード用イベントを送信
             io.emit('clip_preload', {
@@ -1050,6 +1063,7 @@ io.on('connection', (socket) => {
         numTracks = 0;
         for (const key in playingSlots) delete playingSlots[key];
         for (const key in activeClips) delete activeClips[key];
+        for (const key in lastPlayingEmit) delete lastPlayingEmit[key];
         clipLengths = {};
         sceneNames = {};
         trackNames = {};

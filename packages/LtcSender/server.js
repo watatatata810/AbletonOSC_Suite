@@ -66,7 +66,7 @@ io.on('connection', (socket) => {
     handle(socket, 'set_mode', ({ mode }) => controller.setMode(mode));
     handle(socket, 'refresh', async () => {
         controller.checkPatch();
-        await controller.refreshStructure();
+        await controller.refreshStructure(true);
         socket.emit('state', controller.publicState());
     });
 

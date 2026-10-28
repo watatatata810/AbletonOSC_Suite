@@ -18,11 +18,18 @@ const { wavInfo } = require('./wav');
 
 const MONITOR_MS = 1000;
 const STRUCTURE_MS = 5000;
+const SLOW_PROPS_MS = 10000;
 const DISCONNECT_MS = 3000;
 const VERIFY_WAIT_MS = 500;
 const TC_EMIT_MS = 50;
-// 監視で読むクリップのプロパティ (AbletonOSC への負荷を抑えるため必要な分だけ)
-const MONITOR_PROPS = ['is_playing', 'is_triggered', 'warping', 'warp_mode', 'looping', 'loop_end', 'file_path'];
+// 返信は osc-router が全パッケージに配るので、他のパッケージが反応する問い合わせは毎秒は送らない。
+// viewWaves は file_path の返信で波形を描き直してアニメーションし (2026-10-29 実測、毎秒発生)、
+// warping / looping / loop_end の返信でマーカーを送り直し、tempo の返信でログを書き、
+// track/scene の name の返信で画面を更新する。
+// 毎秒読むのは、どのパッケージも反応しないものだけにする
+const MONITOR_PROPS = ['is_playing', 'is_triggered', 'warp_mode'];
+// 鳴るシーンが変わった時に読み、その後は SLOW_PROPS_MS ごと (file_path はシーンが変わった時だけ)
+const SLOW_PROPS = ['warping', 'looping', 'loop_end'];
 const SEEK_PROPS = ['is_playing', 'is_triggered', 'warping', 'looping', 'end_marker', 'loop_end', 'playing_position'];
 
 class Controller extends EventEmitter {
@@ -46,6 +53,12 @@ class Controller extends EventEmitter {
         this.active = null; // { scene, cue, bgmTrack, ltcTrack }
         this.lastTcEmit = 0;
         this.fileSecondsCache = new Map();
+        // 鳴っているシーンのクリップの、あまり変わらないプロパティ (key: "track_clip")
+        this.slowCache = new Map();
+        // テンポは Live からの変更の通知 (start_listen) で受け取る。viewWaves が張ったリスナーの通知も届く
+        this.tempo = null;
+        this.wasConnected = false;
+        this.counts = { tracks: -1, scenes: -1 };
         this.timers = [];
         this.busy = false;
     }
@@ -53,8 +66,8 @@ class Controller extends EventEmitter {
     start() {
         this.checkPatch();
         this.live.on('message', (address, args) => this.onLiveMessage(address, args));
-        this.refreshStructure();
-        this.timers.push(setInterval(() => this.refreshStructure(), STRUCTURE_MS));
+        this.refreshStructure(true);
+        this.timers.push(setInterval(() => this.refreshStructure(false), STRUCTURE_MS));
         this.timers.push(setInterval(() => this.monitor(), MONITOR_MS));
     }
 
@@ -119,13 +132,47 @@ class Controller extends EventEmitter {
 
     // ---- Live の構成 ----
 
-    async refreshStructure() {
-        const [names, scenes] = await Promise.all([this.live.getTrackNames(), this.live.getSceneNames()]);
+    /**
+     * トラック名・シーン名を読み直す。名前の返信には viewWaves も反応するので、
+     * ふだんはトラック数・シーン数だけを確かめ (viewWaves は同じ数なら何もしない)、
+     * 数が変わった時か、force (起動時・画面の「読み直し」) の時だけ名前を読む
+     */
+    async refreshStructure(force) {
+        const [tracks, scenes] = await Promise.all([
+            this.live.value('/live/song/get/num_tracks', [], null),
+            this.live.value('/live/song/get/num_scenes', [], null)
+        ]);
+        if (tracks === null || scenes === null) return;
+        if (!force && tracks === this.counts.tracks && scenes === this.counts.scenes) return;
+        const [names, sceneNames] = await Promise.all([this.live.getTrackNames(), this.live.getSceneNames()]);
+        this.counts = { tracks, scenes };
         const changed = JSON.stringify(names) !== JSON.stringify(this.trackNames)
-            || JSON.stringify(scenes) !== JSON.stringify(this.sceneNames);
+            || JSON.stringify(sceneNames) !== JSON.stringify(this.sceneNames);
         this.trackNames = names;
-        this.sceneNames = scenes;
+        this.sceneNames = sceneNames;
         if (changed) this.emit('state', this.publicState());
+    }
+
+    /** テンポ。通知を受けていなければ 1 回だけ問い合わせる */
+    async currentTempo() {
+        if (this.tempo === null) this.tempo = await this.live.getTempo();
+        return this.tempo;
+    }
+
+    /**
+     * あまり変わらないプロパティを、鳴るシーンが変わった時と SLOW_PROPS_MS ごとに読む。
+     * file_path は viewWaves の波形の描き直しにつながるので、シーンが変わった時だけ読む
+     */
+    async slowProps(track, clip) {
+        const key = `${track}_${clip}`;
+        const cached = this.slowCache.get(key);
+        const now = Date.now();
+        if (cached && now - cached.at < SLOW_PROPS_MS) return cached.props;
+        const props = cached ? SLOW_PROPS : [...SLOW_PROPS, 'file_path'];
+        const fresh = await this.live.getClipState(track, clip, props);
+        const merged = fresh ? { ...(cached ? cached.props : {}), ...fresh } : null;
+        this.slowCache.set(key, { at: now, props: merged });
+        return merged;
     }
 
     trackIndex(name) {
@@ -154,21 +201,30 @@ class Controller extends EventEmitter {
         if (this.busy) return;
         this.busy = true;
         try {
-            const [tempo, quantization] = await Promise.all([this.live.getTempo(), this.live.getQuantization()]);
+            const quantization = await this.live.getQuantization();
+            const connected = this.connected();
+            if (connected && !this.wasConnected) this.onReconnected();
+            this.wasConnected = connected;
+            const tempo = connected ? await this.currentTempo() : this.tempo;
             const show = this.show();
             const snapshot = {
-                connected: this.connected(), patchMissing: this.patchMissing, tempo, quantization,
+                connected, patchMissing: this.patchMissing, tempo, quantization,
                 show, cue: null, bgm: null, ltc: null, ltcTrack: null, startTimes: null
             };
             const extra = [];
             let active = null;
-            if (show && snapshot.connected && this.trackNames.length === 0) await this.refreshStructure();
+            if (show && snapshot.connected && this.trackNames.length === 0) await this.refreshStructure(true);
             if (show && snapshot.connected) {
                 const ltcIdx = this.trackIndex(show.ltcTrack);
                 if (ltcIdx < 0) {
                     extra.push({ level: 'error', code: 'LTC_TRACK_NOT_FOUND', message: `LTC トラック「${show.ltcTrack}」が Live にありません` });
                 } else {
-                    snapshot.ltcTrack = await this.live.getTrackState(ltcIdx);
+                    // トラック名は読まない (name の返信で viewWaves が画面を更新するため)
+                    const [mute, output] = await Promise.all([
+                        this.live.value('/live/track/get/mute', [ltcIdx]),
+                        this.live.value('/live/track/get/output_routing_type', [ltcIdx])
+                    ]);
+                    snapshot.ltcTrack = { track: ltcIdx, name: show.ltcTrack, mute, output };
                 }
                 for (const name of new Set(show.cues.map((c) => c.bgmTrack || show.bgmTrack))) {
                     if (this.trackIndex(name) < 0) {
@@ -179,19 +235,24 @@ class Controller extends EventEmitter {
                 if (cue) {
                     const bgmIdx = this.trackIndex(cue.bgmTrack || show.bgmTrack);
                     snapshot.cue = cue;
-                    const [bgm, ltc, slots] = await Promise.all([
+                    // 鳴るシーンが変わったら、あまり変わらないプロパティを読み直す
+                    if (!this.active || this.active.scene !== cue.scene) this.slowCache.clear();
+                    const [bgm, ltc, slots, bgmSlow, ltcSlow] = await Promise.all([
                         this.live.getClipState(bgmIdx, cue.scene, MONITOR_PROPS),
                         ltcIdx >= 0 ? this.live.getClipState(ltcIdx, cue.scene, MONITOR_PROPS) : null,
-                        this.live.getPlayingSlots(ltcIdx >= 0 ? [bgmIdx, ltcIdx] : [bgmIdx])
+                        this.live.getPlayingSlots(ltcIdx >= 0 ? [bgmIdx, ltcIdx] : [bgmIdx]),
+                        this.slowProps(bgmIdx, cue.scene),
+                        ltcIdx >= 0 ? this.slowProps(ltcIdx, cue.scene) : null
                     ]);
                     // フォローアクションが有効なクリップを「鳴っている」と判断できるよう、鳴っているスロットを添える
-                    snapshot.bgm = bgm ? { ...bgm, playingSlot: slots[0] } : null;
-                    snapshot.ltc = ltc ? { ...ltc, playingSlot: slots[1] } : null;
+                    snapshot.bgm = bgm ? { ...bgmSlow, ...bgm, playingSlot: slots[0] } : null;
+                    snapshot.ltc = ltc ? { ...ltcSlow, ...ltc, playingSlot: slots[1] } : null;
                     if (ltcIdx >= 0 && snapshot.ltc) {
                         snapshot.ltcFileSeconds = this.fileSeconds(snapshot.ltc.filePath);
                         const [b, l] = await this.live.getStartTimes([[bgmIdx, cue.scene], [ltcIdx, cue.scene]]);
                         snapshot.startTimes = { bgm: b, ltc: l };
-                        this.listenLtc(ltcIdx, cue.scene);
+                        const changed = !this.active || this.active.scene !== cue.scene;
+                        if (changed || Date.now() - this.lastTcEmit > 1500) this.listenLtc(ltcIdx, cue.scene);
                     }
                     active = { scene: cue.scene, cue, bgmTrack: bgmIdx, ltcTrack: ltcIdx };
                 }
@@ -237,13 +298,25 @@ class Controller extends EventEmitter {
 
     /**
      * LTC クリップの再生位置の通知を受ける。他のパッケージが stop_listen すると止まるので、
-     * 毎回の監視で張り直す (AbletonOSC 側は同じキーなら 1 つにまとまる)
+     * 鳴るシーンが変わった時と、通知が 1.5 秒途切れた時に張り直す (AbletonOSC 側は同じキーなら 1 つにまとまる)
      */
     listenLtc(track, clip) {
         this.live.listenPosition(track, clip);
     }
 
+    /** Live とつながり直した時 (Live の再起動など)。リスナーは消えているので張り直す */
+    onReconnected() {
+        this.tempo = null;
+        this.slowCache.clear();
+        this.live.send('/live/song/start_listen/tempo');
+    }
+
     onLiveMessage(address, args) {
+        if (address === '/live/song/get/tempo') {
+            // 自分の問い合わせ・リスナーの通知・viewWaves の問い合わせへの返信のどれでも、今のテンポ
+            this.tempo = args[0];
+            return;
+        }
         if (address !== '/live/clip/get/playing_position' || !this.active) return;
         const [track, clip, position] = args;
         if (track !== this.active.ltcTrack || clip !== this.active.scene) return;
@@ -257,7 +330,7 @@ class Controller extends EventEmitter {
     /** LTC クリップの位置 (拍) → 出ている時刻 */
     positionToTC(position, cue) {
         const show = this.show();
-        const tempo = this.status && this.status.tempo;
+        const tempo = this.tempo;
         if (!show || !tempo || position === null || position === undefined) return null;
         const rate = tc.getRate(show.rate);
         const seconds = seek.beatsToSeconds(position, tempo);
@@ -275,7 +348,7 @@ class Controller extends EventEmitter {
         const bgmIdx = this.trackIndex(cue.bgmTrack || show.bgmTrack);
         if (bgmIdx < 0) throw new Error(`BGM トラック「${cue.bgmTrack || show.bgmTrack}」が Live にありません`);
         const [tempo, bgm] = await Promise.all([
-            this.live.getTempo(),
+            this.currentTempo(),
             this.live.getClipState(bgmIdx, scene, ['file_path', 'end_marker', 'loop_end'])
         ]);
         if (!bgm) throw new Error(`シーン ${scene + 1} の BGM トラックにクリップがありません`);
@@ -320,7 +393,7 @@ class Controller extends EventEmitter {
 
     async startFrom(scene, seconds, confirmed) {
         this.guard(confirmed);
-        const tempo = await this.live.getTempo();
+        const tempo = await this.currentTempo();
         const clips = await this.sceneClips(scene, SEEK_PROPS);
         const plan = seek.planStartFrom({ scene, clips, seconds, tempo });
         if (!plan.ok) return { ok: false, problems: plan.problems };
@@ -336,7 +409,7 @@ class Controller extends EventEmitter {
         this.guard(confirmed);
         if (!this.active) return { ok: false, problems: ['台帳のシーンが鳴っていません'] };
         const { scene, bgmTrack } = this.active;
-        const tempo = await this.live.getTempo();
+        const tempo = await this.currentTempo();
         const clips = await this.sceneClips(scene, SEEK_PROPS);
         const referencePosition = await this.live.getExactPosition(bgmTrack, scene);
         const plan = seek.planJump({ clips, referencePosition, tempo, ...opts });
