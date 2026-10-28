@@ -68,6 +68,41 @@ const readChannel = (wav, channel = 0) => {
     return out;
 };
 
+/**
+ * ヘッダーだけを読んで長さを返す (曲の WAV は大きいので全体を読まない)。WAV でなければ null
+ * @returns {{sampleRate:number, channels:number, bitsPerSample:number, seconds:number}|null}
+ */
+const wavInfo = (filePath) => {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+        const head = Buffer.alloc(12);
+        if (fs.readSync(fd, head, 0, 12, 0) < 12) return null;
+        if (head.toString('ascii', 0, 4) !== 'RIFF' || head.toString('ascii', 8, 12) !== 'WAVE') return null;
+        const stat = fs.fstatSync(fd);
+        let pos = 12;
+        let fmt = null;
+        const chunk = Buffer.alloc(8);
+        while (pos + 8 <= stat.size) {
+            fs.readSync(fd, chunk, 0, 8, pos);
+            const id = chunk.toString('ascii', 0, 4);
+            const size = chunk.readUInt32LE(4);
+            if (id === 'fmt ') {
+                const body = Buffer.alloc(16);
+                fs.readSync(fd, body, 0, 16, pos + 8);
+                fmt = { channels: body.readUInt16LE(2), sampleRate: body.readUInt32LE(4), bitsPerSample: body.readUInt16LE(14) };
+            } else if (id === 'data' && fmt) {
+                // 書きかけのファイルでは size が実際より大きいことがあるので、ファイルの残りで抑える
+                const bytes = Math.min(size, stat.size - pos - 8);
+                return { ...fmt, seconds: bytes / (fmt.channels * (fmt.bitsPerSample / 8)) / fmt.sampleRate };
+            }
+            pos += 8 + size + (size & 1);
+        }
+        return null;
+    } finally {
+        fs.closeSync(fd);
+    }
+};
+
 const readWavFile = (filePath, channel = 0) => {
     const wav = parseWav(fs.readFileSync(filePath));
     return { sampleRate: wav.sampleRate, channels: wav.channels, samples: readChannel(wav, channel) };
@@ -102,6 +137,7 @@ const encodeWav24Mono = (samples, sampleRate) => {
 module.exports = {
     parseWav,
     readChannel,
+    wavInfo,
     readWavFile,
     encodeWav24Mono
 };
