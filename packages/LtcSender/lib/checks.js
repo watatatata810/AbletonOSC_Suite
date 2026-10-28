@@ -16,6 +16,14 @@ const RATIO_TOLERANCE = 0.005;
 const issue = (level, code, message) => ({ level, code, message });
 
 /**
+ * クリップが鳴っているか。フォローアクションが有効なクリップは、鳴っている間も Live の API が
+ * is_playing=False / is_triggered=True と答える (曲の終わりの発音が予約されているため。2026-10-28 実測)。
+ * そのため、トラックで今鳴っているスロット (playing_slot_index) がそのクリップかでも判断する
+ * @param {object} c - Live.getClipState の戻り値に playingSlot (トラックの playing_slot_index) を足したもの
+ */
+const isClipPlaying = (c) => Boolean(c && (c.isPlaying || (c.playingSlot !== undefined && c.playingSlot === c.clip)));
+
+/**
  * @param {object} s
  * @param {boolean} s.connected - Live から返信が来ているか
  * @param {string[]} s.patchMissing - AbletonOSC に足りない命令
@@ -49,15 +57,16 @@ const evaluate = (s) => {
     }
     if (!s.cue) return out;
 
-    const bgmPlaying = s.bgm && s.bgm.isPlaying;
+    const bgmPlaying = isClipPlaying(s.bgm);
+    const ltcPlaying = isClipPlaying(s.ltc);
     if (!s.ltc) {
         out.push(issue(bgmPlaying ? 'error' : 'warn', 'LTC_MISSING', `シーン ${s.cue.scene + 1} の LTC トラックにクリップがありません`));
         return out;
     }
-    if (bgmPlaying && !s.ltc.isPlaying) {
+    if (bgmPlaying && !ltcPlaying) {
         out.push(issue('error', 'LTC_NOT_PLAYING', `シーン ${s.cue.scene + 1} の LTC が鳴っていません`));
     }
-    if (bgmPlaying && s.ltc.isPlaying && s.startTimes && s.startTimes.bgm !== null && s.startTimes.ltc !== null) {
+    if (bgmPlaying && ltcPlaying && s.startTimes && s.startTimes.bgm !== null && s.startTimes.ltc !== null) {
         const diff = Math.abs(s.startTimes.bgm - s.startTimes.ltc);
         if (diff > SYNC_TOLERANCE_BEATS) {
             out.push(issue('error', 'LTC_OUT_OF_SYNC', `BGM と LTC の位置が ${(diff * 60 / (s.tempo || 120) * 1000).toFixed(1)}ms ずれています`));
@@ -86,5 +95,6 @@ const evaluate = (s) => {
 module.exports = {
     WARP_MODE_REPITCH,
     SYNC_TOLERANCE_BEATS,
+    isClipPlaying,
     evaluate
 };

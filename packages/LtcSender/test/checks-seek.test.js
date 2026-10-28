@@ -36,6 +36,14 @@ test('監視: Live から返信が無い時はそれだけを出す', () => {
 
 test('監視: LTC が鳴っていない / ずれている / クリップが無い', () => {
     assert.ok(codes(base({ ltc: clip({ track: 4, isPlaying: false }) })).includes('LTC_NOT_PLAYING'));
+    // フォローアクションが有効な LTC クリップ: API は再生待ちと答えるが、トラックで鳴っているスロットがそのシーン
+    // (2026-10-28 実測、シーン 15 の M2_LTC)。鳴っていると判断して警告しない
+    const followAction = clip({ track: 4, isPlaying: false, isTriggered: true, playingSlot: 12 });
+    assert.deepEqual(codes(base({ ltc: followAction })), []);
+    // 本当に発音待ち (鳴っているスロットが別) なら警告する
+    assert.ok(codes(base({ ltc: clip({ track: 4, isPlaying: false, isTriggered: true, playingSlot: 3 }) })).includes('LTC_NOT_PLAYING'));
+    // BGM 側がフォローアクションで再生待ちと答えても、鳴っていると判断して LTC を確かめる
+    assert.ok(codes(base({ bgm: clip({ isPlaying: false, isTriggered: true, playingSlot: 12 }), ltc: clip({ track: 4, isPlaying: false }) })).includes('LTC_NOT_PLAYING'));
     // LTC だけ 1 拍ずらすと start_time が 1 違った (実測)
     assert.ok(codes(base({ startTimes: { bgm: -74, ltc: -75 } })).includes('LTC_OUT_OF_SYNC'));
     assert.ok(codes(base({ startTimes: { bgm: -94, ltc: -93.99 } })).includes('LTC_OUT_OF_SYNC'));
@@ -100,29 +108,45 @@ test('飛ばす: 鳴り終わったクリップは外す', () => {
     assert.deepEqual(p.skipped.map((c) => c.track), [1]);
 });
 
-test('飛ばす: 全クリップを同じ拍数だけ動かす', () => {
+test('飛ばす: 全クリップへ目的の位置の scrub + stop_scrub を送る (1 バンドル)', () => {
     const clips = [clip({ track: 0 }), clip({ track: 4 })];
     const back = seek.planJump({ clips, referencePosition: 1000, deltaSeconds: -10, tempo: 120 });
     assert.equal(back.ok, true);
+    assert.equal(back.targetBeats, 980);
     assert.equal(back.deltaBeats, -20);
-    assert.deepEqual(back.messages.map((m) => m[3].value), [-20, -20]);
+    assert.deepEqual(back.messages.map((m) => [m[0], m[1]]), [
+        ['/live/clip/scrub', 0], ['/live/clip/scrub', 4], ['/live/clip/stop_scrub', 0], ['/live/clip/stop_scrub', 4]
+    ]);
+    assert.deepEqual(back.messages[0][3], { type: 'float', value: 980 });
     const to = seek.planJump({ clips, referencePosition: 1000, seconds: 83, tempo: 120 });
     assert.equal(to.targetBeats, 166);
     assert.equal(to.deltaBeats, -834);
 });
 
-test('飛ばす: 再生待ちのクリップがあれば送らない (命令が無視されて片方だけ動くため)', () => {
-    const p = seek.planJump({ clips: [clip(), clip({ track: 4, isPlaying: false, isTriggered: true })], referencePosition: 100, deltaSeconds: 5, tempo: 120 });
-    assert.equal(p.ok, false);
-    assert.ok(p.problems[0].includes('トラック 5'));
-    assert.equal(seek.planJump({ clips: [clip()], referencePosition: 10, deltaSeconds: -10, tempo: 120 }).ok, false);
+test('飛ばす: フォローアクションが有効なクリップ (API 上は再生待ち) も鳴っているとして動かす', () => {
+    // 2026-10-28 実測: シーン 29 の BGM (M-6 Judas) は鳴っているのに is_playing=False / is_triggered=True。
+    // トラックの playing_slot_index はそのシーンを指していた
+    const followAction = clip({ track: 0, clip: 28, isPlaying: false, isTriggered: true, playingSlot: 28 });
+    const p = seek.planJump({ clips: [followAction, clip({ track: 4, clip: 28 })], referencePosition: 100, deltaSeconds: 5, tempo: 120 });
+    assert.equal(p.ok, true);
+    assert.deepEqual(p.targets.map((c) => c.track), [0, 4]);
 });
 
-test('実行後の確認: 揃っていて飛び先にあれば合格', () => {
-    const ok = seek.verifyPositions([{ position: 960.2, isPlaying: true }, { position: 960.25, isPlaying: true }], [-74, -74], 960, 1.5);
+test('飛ばす: 本当に発音待ちのクリップがあれば送らない (飛ばした後に頭から鳴ってずれるため)', () => {
+    const pending = clip({ track: 4, isPlaying: false, isTriggered: true, playingSlot: -1 });
+    const p = seek.planJump({ clips: [clip(), pending], referencePosition: 100, deltaSeconds: 5, tempo: 120 });
+    assert.equal(p.ok, false);
+    assert.ok(p.problems.some((x) => x.includes('トラック 5')));
+    assert.equal(seek.planJump({ clips: [clip()], referencePosition: 10, deltaSeconds: -10, tempo: 120 }).ok, false);
+    assert.equal(seek.planJump({ clips: [clip()], referencePosition: null, deltaSeconds: 5, tempo: 120 }).ok, false);
+});
+
+test('実行後の確認: 位置は曲全体の時刻 − start_time で求め、揃っていて飛び先にあれば合格', () => {
+    // 曲全体の時刻 886.2、start_time -74 → 位置 960.2
+    const ok = seek.verifyPositions([-74, -74], 886.2, 960, 1.5);
     assert.equal(ok.ok, true);
-    const off = seek.verifyPositions([{ position: 960.2, isPlaying: true }, { position: 960.2, isPlaying: true }], [-74, -75], 960, 1.5);
-    assert.equal(off.ok, false);
-    const notJumped = seek.verifyPositions([{ position: 10, isPlaying: true }], [-74], 960, 1.5);
-    assert.equal(notJumped.ok, false);
+    assert.ok(Math.abs(ok.positions[0] - 960.2) < 1e-9);
+    assert.equal(seek.verifyPositions([-74, -75], 886.2, 960, 1.5).ok, false);
+    assert.equal(seek.verifyPositions([-74], 10, 960, 1.5).ok, false);
+    assert.equal(seek.verifyPositions([-74, null], 886.2, 960, 1.5).ok, false);
 });

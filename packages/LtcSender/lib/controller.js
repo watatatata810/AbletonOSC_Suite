@@ -179,10 +179,14 @@ class Controller extends EventEmitter {
                 if (cue) {
                     const bgmIdx = this.trackIndex(cue.bgmTrack || show.bgmTrack);
                     snapshot.cue = cue;
-                    [snapshot.bgm, snapshot.ltc] = await Promise.all([
+                    const [bgm, ltc, slots] = await Promise.all([
                         this.live.getClipState(bgmIdx, cue.scene, MONITOR_PROPS),
-                        ltcIdx >= 0 ? this.live.getClipState(ltcIdx, cue.scene, MONITOR_PROPS) : null
+                        ltcIdx >= 0 ? this.live.getClipState(ltcIdx, cue.scene, MONITOR_PROPS) : null,
+                        this.live.getPlayingSlots(ltcIdx >= 0 ? [bgmIdx, ltcIdx] : [bgmIdx])
                     ]);
+                    // フォローアクションが有効なクリップを「鳴っている」と判断できるよう、鳴っているスロットを添える
+                    snapshot.bgm = bgm ? { ...bgm, playingSlot: slots[0] } : null;
+                    snapshot.ltc = ltc ? { ...ltc, playingSlot: slots[1] } : null;
                     if (ltcIdx >= 0 && snapshot.ltc) {
                         snapshot.ltcFileSeconds = this.fileSeconds(snapshot.ltc.filePath);
                         const [b, l] = await this.live.getStartTimes([[bgmIdx, cue.scene], [ltcIdx, cue.scene]]);
@@ -289,20 +293,29 @@ class Controller extends EventEmitter {
         if (this.mode === 'show' && !confirmed) throw new Error('本番モードでは確認が必要です');
     }
 
+    /** シーンのクリップの状態に、トラックで今鳴っているスロット (playingSlot) を足して返す */
     async sceneClips(scene, props) {
         const tracks = await this.live.getSceneTracks(scene, this.trackNames.length);
-        const states = await Promise.all(tracks.map((t) => this.live.getClipState(t, scene, props)));
-        return states.filter(Boolean);
+        const [states, slots] = await Promise.all([
+            Promise.all(tracks.map((t) => this.live.getClipState(t, scene, props))),
+            this.live.getPlayingSlots(tracks)
+        ]);
+        return states
+            .map((s, i) => (s ? { ...s, playingSlot: slots[i] } : null))
+            .filter(Boolean);
     }
 
     async verifyAfter(clips, targetBeats, tempo) {
         await new Promise((r) => setTimeout(r, VERIFY_WAIT_MS));
-        const pairs = clips.map((c) => [c.track, c.clip]);
-        const positions = await this.live.getPositions(pairs);
-        const startTimes = await this.live.getStartTimes(pairs);
+        const res = await this.live.queryBundle([
+            ['/live/song/get/current_song_time'],
+            ...clips.map((c) => ['/live/clip/get/start_time', c.track, c.clip])
+        ]);
+        const songTime = res[0] ? res[0][0] : null;
+        const startTimes = res.slice(1).map((r) => (r ? r[0] : null));
         // 送ってから読み直すまで (待ち時間 + 発音までの遅れ 0.4 秒) に進む分を許す
         const elapsed = seek.secondsToBeats((VERIFY_WAIT_MS + 1000) / 1000, tempo);
-        return { positions, startTimes, ...seek.verifyPositions(positions, startTimes, targetBeats, elapsed) };
+        return { tracks: clips.map((c) => c.track), startTimes, ...seek.verifyPositions(startTimes, songTime, targetBeats, elapsed) };
     }
 
     async startFrom(scene, seconds, confirmed) {
@@ -325,8 +338,8 @@ class Controller extends EventEmitter {
         const { scene, bgmTrack } = this.active;
         const tempo = await this.live.getTempo();
         const clips = await this.sceneClips(scene, SEEK_PROPS);
-        const [ref] = await this.live.getPositions([[bgmTrack, scene]]);
-        const plan = seek.planJump({ clips, referencePosition: ref.position, tempo, ...opts });
+        const referencePosition = await this.live.getExactPosition(bgmTrack, scene);
+        const plan = seek.planJump({ clips, referencePosition, tempo, ...opts });
         if (!plan.ok) return { ok: false, problems: plan.problems };
         await this.live.sendBundle(plan.messages);
         const verify = await this.verifyAfter(plan.targets, plan.targetBeats, tempo);

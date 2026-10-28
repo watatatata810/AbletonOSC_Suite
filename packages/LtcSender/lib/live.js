@@ -217,6 +217,30 @@ class Live extends EventEmitter {
     }
 
     /**
+     * 再生中のクリップの今の位置 (拍) を、曲全体の時刻 − start_time で求める。
+     * 2 つを 1 つのバンドルで読むので同じ瞬間の値になり、リスナーの通知と取り違えることもない
+     * @returns {Promise<number|null>}
+     */
+    async getExactPosition(track, clip) {
+        const [song, start] = await this.queryBundle([
+            ['/live/song/get/current_song_time'],
+            ['/live/clip/get/start_time', track, clip]
+        ]);
+        if (!song || !start) return null;
+        return song[0] - start[0];
+    }
+
+    /**
+     * 複数トラックの「今鳴っているスロット」(なければ -1)
+     * @param {number[]} tracks
+     * @returns {Promise<Array<number|null>>}
+     */
+    async getPlayingSlots(tracks) {
+        const res = await this.queryBundle(tracks.map((t) => ['/live/track/get/playing_slot_index', t]));
+        return res.map((r) => (r ? r[0] : null));
+    }
+
+    /**
      * 複数クリップの再生位置と再生中かを読む。
      * 注意: 再生位置はリスナー (viewWaves や LtcSender 自身の start_listen) の通知と同じ形で届くので、
      * 返信の代わりに少し前の通知を受け取ることがある。厳密な比較には getStartTimes を使う
