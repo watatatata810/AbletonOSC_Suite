@@ -77,7 +77,7 @@ class Controller extends EventEmitter {
     }
 
     checkPatch() {
-        this.patchMissing = patch.checkFile(this.clipPyPath).missing;
+        this.patchMissing = patch.checkInstall(this.clipPyPath).missing;
     }
 
     // ---- 台帳 ----

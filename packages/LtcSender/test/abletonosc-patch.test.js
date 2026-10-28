@@ -82,3 +82,47 @@ test('checkFile: ファイルが無ければ全部足りない扱い', () => {
     assert.equal(r.exists, false);
     assert.equal(r.missing.length, 3);
 });
+
+// ---- osc_server.py (Windows の WSAECONNRESET 対策) ----
+const UPSTREAM_OSC_SERVER = fs.readFileSync(path.join(__dirname, 'fixtures', 'abletonosc-osc_server.py'), 'utf-8');
+
+test('osc_server.py: 上流版には 2 つとも当たっていない', () => {
+    assert.deepEqual(patch.missingOscServerPatches(UPSTREAM_OSC_SERVER), ['osc_server:recv_reset', 'osc_server:send_reset']);
+});
+
+test('osc_server.py: 受信はエラーを読み飛ばして続け、送信はエラーを無視する', () => {
+    const out = patch.applyOscServerToSource(UPSTREAM_OSC_SERVER);
+    assert.deepEqual(patch.missingOscServerPatches(out), []);
+    // 受信: recvfrom を try で包み、ConnectionResetError なら continue (ループを抜けない)
+    assert.match(out, /\n( +)try:\n\1    data, remote_addr = self\._socket\.recvfrom\(65536\)\n\1except ConnectionResetError:\n(?:\1    #.*\n)+\1    continue\n/);
+    // 送信: sendto を try で包み、ConnectionResetError なら何もしない
+    assert.match(out, /\n( +)try:\n\1    self\._socket\.sendto\(msg\.dgram, remote_addr\)\n\1except ConnectionResetError:\n(?:\1    #.*\n)+\1    pass\n/);
+    // 元の行で変わる (try の中へ字下げされる) のは、recvfrom と sendto の 2 行だけ
+    const removed = UPSTREAM_OSC_SERVER.split('\n').filter((l) => !out.split('\n').includes(l)).map((l) => l.trim());
+    assert.deepEqual(removed.sort(), [
+        'data, remote_addr = self._socket.recvfrom(65536)',
+        'self._socket.sendto(msg.dgram, remote_addr)'
+    ]);
+});
+
+test('osc_server.py: 2 回当てても変わらない / CRLF は CRLF のまま', () => {
+    const once = patch.applyOscServerToSource(UPSTREAM_OSC_SERVER);
+    assert.equal(patch.applyOscServerToSource(once), once);
+    const crlf = patch.applyOscServerToSource(UPSTREAM_OSC_SERVER.replace(/\n/g, '\r\n'));
+    assert.equal(crlf.replace(/\r\n/g, '').includes('\n'), false);
+});
+
+test('checkInstall / applyInstall: clip.py と osc_server.py をまとめて確かめて当てる', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ltcsender-install-'));
+    const clip = path.join(dir, 'clip.py');
+    fs.writeFileSync(clip, UPSTREAM);
+    fs.writeFileSync(path.join(dir, 'osc_server.py'), UPSTREAM_OSC_SERVER);
+    assert.equal(patch.checkInstall(clip).missing.length, 5);
+    const r = patch.applyInstall(clip, new Date(2026, 9, 29, 1, 0, 0));
+    assert.equal(r.clip.changed, true);
+    assert.equal(r.oscServer.changed, true);
+    assert.equal(path.basename(r.oscServer.backup), 'osc_server.py.bak-20261029-010000');
+    assert.deepEqual(patch.checkInstall(clip).missing, []);
+    assert.equal(patch.applyInstall(clip).oscServer.changed, false);
+    fs.rmSync(dir, { recursive: true });
+});

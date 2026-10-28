@@ -40,7 +40,7 @@ controller.on('status', (status) => io.emit('status', status));
 controller.on('tc', (display) => io.volatile.emit('tc', display));
 controller.start();
 if (controller.patchMissing.length > 0) {
-    console.warn(`[AbletonOSC Patch] 足りない命令: ${controller.patchMissing.join(', ')}。node scripts/apply-abletonosc-patch.js を実行してください`);
+    console.warn(`[AbletonOSC Patch] 足りない改造: ${controller.patchMissing.join(', ')}。node scripts/apply-abletonosc-patch.js を実行してください`);
 }
 
 /**

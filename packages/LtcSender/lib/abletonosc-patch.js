@@ -4,7 +4,8 @@
  * 上流の abletonosc/clip.py は Clip の move_playing_pos / scrub / stop_scrub を OSC に出していない。
  * `methods = [...]` の一覧に名前を足すと、/live/clip/<名前> <track> <clip> [引数] で呼べるようになる
  * (handler.py の _call_method が引数をそのまま Live API に渡す)。
- * AbletonOSC を更新すると改造は消えるので、起動時に checkFile で確かめる。
+ * あわせて abletonosc/osc_server.py に Windows の WSAECONNRESET 対策を当てる (下の OSC_SERVER_PATCHES)。
+ * AbletonOSC を更新すると改造は消えるので、起動時に checkInstall で確かめる。
  */
 const fs = require('fs');
 const os = require('os');
@@ -73,19 +74,114 @@ const applyFile = (filePath = defaultClipPyPath(), now = new Date()) => {
     const src = fs.readFileSync(filePath, 'utf-8');
     const added = missingMethods(src);
     if (added.length === 0) return { path: filePath, changed: false, backup: null, added };
-    const p = (n) => String(n).padStart(2, '0');
-    const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-    const backup = `${filePath}.bak-${stamp}`;
+    const backup = backupPath(filePath, now);
     fs.copyFileSync(filePath, backup);
     fs.writeFileSync(filePath, applyToSource(src), 'utf-8');
     return { path: filePath, changed: true, backup, added };
 };
 
+// ---- osc_server.py: Windows の WSAECONNRESET 対策 ----
+//
+// Windows では、閉じたポートへ送った UDP のデータグラム 1 件ごとに WSAECONNRESET (10054) が
+// 1 件ためられ、次の recvfrom で報告される。上流の process() はこれを「無害」として記録したうえで
+// その回の受信を打ち切るため、0.1 秒ごとに 1 件ずつしか消化できない。
+// osc-router の再起動中 (返信の送り先 11001 が閉じている約 10 秒) に再生位置の通知などが
+// 約 1,000 件ためられ、その後 80 秒以上、問い合わせが 1 件も処理されなかった (2026-10-29 実測)。
+// 受信側はエラーを読み飛ばして受信を続け、送信側は上流 PR #214 と同じくエラーを無視する。
+const OSC_SERVER_PATCHES = [
+    {
+        id: 'osc_server:recv_reset',
+        marker: 'LtcSender patch: recv reset',
+        pattern: /^([ \t]*)data, remote_addr = self\._socket\.recvfrom\(65536\)[ \t]*$/m,
+        build: (i, eol) => [
+            `${i}try:`,
+            `${i}    data, remote_addr = self._socket.recvfrom(65536)`,
+            `${i}except ConnectionResetError:`,
+            `${i}    # LtcSender patch: recv reset`,
+            `${i}    # On Windows, each datagram sent to a closed port queues one WSAECONNRESET.`,
+            `${i}    # Skip them all in this tick instead of stopping, or queued requests stall for minutes.`,
+            `${i}    continue`
+        ].join(eol)
+    },
+    {
+        id: 'osc_server:send_reset',
+        marker: 'LtcSender patch: send reset',
+        pattern: /^([ \t]*)self\._socket\.sendto\(msg\.dgram, remote_addr\)[ \t]*$/m,
+        build: (i, eol) => [
+            `${i}try:`,
+            `${i}    self._socket.sendto(msg.dgram, remote_addr)`,
+            `${i}except ConnectionResetError:`,
+            `${i}    # LtcSender patch: send reset (same as upstream PR #214)`,
+            `${i}    pass`
+        ].join(eol)
+    }
+];
+
+const oscServerPathFor = (clipPyPath) => path.join(path.dirname(clipPyPath), 'osc_server.py');
+
+/** @returns {string[]} 当たっていない osc_server.py の修正の id */
+const missingOscServerPatches = (src) => OSC_SERVER_PATCHES.filter((p) => !src.includes(p.marker)).map((p) => p.id);
+
+const applyOscServerToSource = (src) => {
+    const eol = src.includes('\r\n') ? '\r\n' : '\n';
+    let out = src;
+    for (const p of OSC_SERVER_PATCHES) {
+        if (out.includes(p.marker)) continue;
+        const m = p.pattern.exec(out);
+        if (!m) throw new Error(`osc_server.py に ${p.id} を当てる場所が見つかりません (AbletonOSC の版が違う可能性があります)`);
+        out = out.slice(0, m.index) + p.build(m[1], eol) + out.slice(m.index + m[0].length);
+    }
+    return out;
+};
+
+const backupPath = (filePath, now) => {
+    const p = (n) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+    return `${filePath}.bak-${stamp}`;
+};
+
+/**
+ * clip.py と osc_server.py の改造をまとめて確かめる
+ * @returns {{missing:string[], clip:object, oscServer:{path:string, exists:boolean, missing:string[]}}}
+ */
+const checkInstall = (clipPyPath = defaultClipPyPath()) => {
+    const clip = checkFile(clipPyPath);
+    const oscPath = oscServerPathFor(clipPyPath);
+    const oscServer = fs.existsSync(oscPath)
+        ? { path: oscPath, exists: true, missing: missingOscServerPatches(fs.readFileSync(oscPath, 'utf-8')) }
+        : { path: oscPath, exists: false, missing: OSC_SERVER_PATCHES.map((p) => p.id) };
+    return { missing: [...clip.missing, ...oscServer.missing], clip, oscServer };
+};
+
+/**
+ * clip.py と osc_server.py の改造をまとめて当てる。変更が要るファイルだけ、元を .bak-<日時> に残す
+ */
+const applyInstall = (clipPyPath = defaultClipPyPath(), now = new Date()) => {
+    const clip = applyFile(clipPyPath, now);
+    const oscPath = oscServerPathFor(clipPyPath);
+    const src = fs.readFileSync(oscPath, 'utf-8');
+    const added = missingOscServerPatches(src);
+    let oscServer = { path: oscPath, changed: false, backup: null, added };
+    if (added.length > 0) {
+        const out = applyOscServerToSource(src);
+        const backup = backupPath(oscPath, now);
+        fs.copyFileSync(oscPath, backup);
+        fs.writeFileSync(oscPath, out, 'utf-8');
+        oscServer = { path: oscPath, changed: true, backup, added };
+    }
+    return { clip, oscServer };
+};
+
 module.exports = {
     REQUIRED_METHODS,
+    OSC_SERVER_PATCHES,
     defaultClipPyPath,
     missingMethods,
     applyToSource,
     checkFile,
-    applyFile
+    applyFile,
+    missingOscServerPatches,
+    applyOscServerToSource,
+    checkInstall,
+    applyInstall
 };
