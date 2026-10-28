@@ -9,7 +9,9 @@ Ableton Live のクリップとして鳴らす LTC (音声のタイムコード)
 
 ## 導入 (初回と、AbletonOSC を更新した時)
 
-1. AbletonOSC に、このツールが使う 3 つの命令 (`move_playing_pos` / `scrub` / `stop_scrub`) を足します。元のファイルは `clip.py.bak-<日時>` に残ります
+1. AbletonOSC に改造を当てます。元のファイルは `.bak-<日時>` に残ります
+   - `clip.py`: このツールが使う 3 つの命令 (`move_playing_pos` / `scrub` / `stop_scrub`) を足す
+   - `osc_server.py`: Windows で osc-router を止めた直後などに、AbletonOSC が 1 分以上問い合わせに答えなくなる問題の対策 (WSAECONNRESET を読み飛ばす)。viewWaves など他のツールにも効きます
 
    ```bash
    node packages/LtcSender/scripts/apply-abletonosc-patch.js
