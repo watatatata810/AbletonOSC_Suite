@@ -6,8 +6,10 @@ const os = require('os');
 const kill = require('tree-kill');
 const QRCode = require('qrcode');
 const fs = require('fs');
+const { neutralinoBinaryName } = require('../../../shared-utils/neutralinoBinary');
 
 const PORT = 3020;
+const IS_WINDOWS = process.platform === 'win32';
 const logFilePath = path.join(__dirname, 'extension.log');
 
 function logToFile(msg) {
@@ -101,15 +103,7 @@ async function startPackage(pkgName) {
   if (pkg.httpPort) env.PORT = String(pkg.httpPort);
 
   if (pkg.type === 'neutralino') {
-    let binary = '';
-    if (process.platform === 'win32') {
-      binary = 'neutralino-win_x64.exe';
-    } else if (process.platform === 'darwin') {
-      binary = 'neutralino-mac_x64';
-    } else {
-      binary = 'neutralino-linux_x64';
-    }
-    const binaryPath = path.join(pkgDir, 'bin', binary);
+    const binaryPath = path.join(pkgDir, 'bin', neutralinoBinaryName());
     // 診断ログ収集および環境変数の明示的伝達のため、標準入出力をパイプし、環境変数を引き渡す
     child = spawn(binaryPath, ['--load-dir-res', '--path=.'], {
       cwd: pkgDir,
@@ -262,10 +256,12 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } else if (req.url === '/launch-ableton') {
-          const abletonPath = appConfig.global?.abletonPath;
+          // Mac では abletonPathMac (Ableton Live の .app) を使う。Windows と同じ config.json を共有するため分けている
+          const pathKey = process.platform === 'darwin' ? 'abletonPathMac' : 'abletonPath';
+          const abletonPath = appConfig.global?.[pathKey];
           if (!abletonPath) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'config.json 内に abletonPath が設定されていません。' }));
+            res.end(JSON.stringify({ success: false, message: `config.json 内に ${pathKey} が設定されていません。` }));
             return;
           }
 
@@ -278,7 +274,11 @@ const server = http.createServer(async (req, res) => {
 
           logToFile(`Launching Ableton Live from: ${abletonPath}`);
           try {
-            const child = spawn(abletonPath, [], {
+            // Mac の .app はフォルダなので直接は実行できない。open -a で開く
+            const [command, args] = process.platform === 'darwin'
+              ? ['open', ['-a', abletonPath]]
+              : [abletonPath, []];
+            const child = spawn(command, args, {
               detached: true,
               stdio: 'ignore'
             });
@@ -318,8 +318,13 @@ const execText = (command) => new Promise((resolve) => {
   exec(command, { windowsHide: true, timeout: 10000 }, (err, stdout) => resolve(err ? '' : stdout));
 });
 
-/** ポートで待ち受けているプロセスの PID (Windows の netstat を読む)。見つからなければ null */
+/** ポートで待ち受けているプロセスの PID (Windows は netstat、Mac / Linux は lsof を読む)。見つからなければ null */
 async function findListeningPid(port) {
+  if (!IS_WINDOWS) {
+    const out = await execText(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`);
+    const n = Number(out.trim().split(/\s+/)[0]);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }
   const out = await execText('netstat -ano -p tcp');
   for (const line of out.split(/\r?\n/)) {
     const cols = line.trim().split(/\s+/);
@@ -329,7 +334,9 @@ async function findListeningPid(port) {
 }
 
 async function getCommandLine(pid) {
-  const out = await execText(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine"`);
+  const out = IS_WINDOWS
+    ? await execText(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine"`)
+    : await execText(`ps -o command= -p ${pid}`);
   return out.trim();
 }
 
@@ -415,7 +422,9 @@ async function replaceStaleService() {
 const PARENT_CHECK_MS = 2000;
 
 async function getParentPid(pid) {
-  const out = await execText(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId"`);
+  const out = IS_WINDOWS
+    ? await execText(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId"`)
+    : await execText(`ps -o ppid= -p ${pid}`);
   const n = Number(out.trim());
   return Number.isInteger(n) && n > 0 ? n : null;
 }
@@ -431,13 +440,29 @@ const isAlive = (pid) => {
 
 /** 自分を起動した Neutralino (node ← cmd.exe /c ← neutralino) が終了したら止まる */
 async function watchNeutralinoProcess() {
-  // Windows では cmd.exe /c を間に挟んで起動される。それ以外では直接の親が Neutralino
-  const neutralinoPid = process.platform === 'win32' ? await getParentPid(process.ppid) : process.ppid;
+  // Windows では cmd.exe /c を間に挟んで起動される。
+  // Mac / Linux は直接の親かシェルを挟んだ先かを確かめていないため、祖先を 3 代までたどって探す
+  let neutralinoPid = null;
+  let name = '';
+  if (IS_WINDOWS) {
+    neutralinoPid = await getParentPid(process.ppid);
+    name = neutralinoPid ? await getCommandLine(neutralinoPid) : '';
+  } else {
+    let pid = process.ppid;
+    for (let i = 0; i < 3 && pid && pid > 1; i++) {
+      const cmd = await getCommandLine(pid);
+      if (cmd.includes('neutralino')) {
+        neutralinoPid = pid;
+        name = cmd;
+        break;
+      }
+      pid = await getParentPid(pid);
+    }
+  }
   if (!neutralinoPid) {
     logToFile('[Launcher Extension] Could not find the Neutralino process. The service will not stop when the window closes.');
     return;
   }
-  const name = await getCommandLine(neutralinoPid);
   if (!name.includes('neutralino')) {
     logToFile(`[Launcher Extension] Parent PID ${neutralinoPid} is not Neutralino (${name}). Not watching it.`);
     return;

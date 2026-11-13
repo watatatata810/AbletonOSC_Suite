@@ -127,3 +127,9 @@ test('checkInstall / applyInstall: clip.py と osc_server.py をまとめて確�
     assert.equal(patch.applyInstall(clip).oscServer.changed, false);
     fs.rmSync(dir, { recursive: true });
 });
+
+test('defaultClipPyPath: User Library の既定は Windows が Documents、Mac が Music', () => {
+    const tail = path.join('Ableton', 'User Library', 'Remote Scripts', 'AbletonOSC', 'abletonosc', 'clip.py');
+    assert.equal(patch.defaultClipPyPath('win32'), path.join(os.homedir(), 'Documents', tail));
+    assert.equal(patch.defaultClipPyPath('darwin'), path.join(os.homedir(), 'Music', tail));
+});

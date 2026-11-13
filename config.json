@@ -4,6 +4,7 @@
     "abletonPort": 11000,
     "httpHost": "0.0.0.0",
     "abletonPath": "C:\\ProgramData\\Ableton\\Live 12 Standard\\Program\\Ableton Live 12 Standard.exe",
+    "abletonPathMac": "/Applications/Ableton Live 12 Standard.app",
     "debug": false
   },
   "packages": [

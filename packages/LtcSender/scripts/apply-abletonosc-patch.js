@@ -4,7 +4,8 @@
  * - osc_server.py: Windows の WSAECONNRESET で問い合わせが数十秒止まる問題の対策
  *
  * 使い方: node scripts/apply-abletonosc-patch.js [clip.py のパス]
- * パスを省くと Documents\Ableton\User Library\Remote Scripts\AbletonOSC\abletonosc\clip.py。
+ * パスを省くと Documents\Ableton\User Library\Remote Scripts\AbletonOSC\abletonosc\clip.py
+ * (Mac は ~/Music/Ableton/User Library/Remote Scripts/AbletonOSC/abletonosc/clip.py)。
  * 当てた後は Ableton Live を再起動すると読み込まれる。AbletonOSC を更新したら、もう一度実行する。
  */
 const patch = require('../lib/abletonosc-patch');

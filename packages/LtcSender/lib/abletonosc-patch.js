@@ -13,8 +13,10 @@ const path = require('path');
 
 const REQUIRED_METHODS = ['move_playing_pos', 'scrub', 'stop_scrub'];
 
-const defaultClipPyPath = () => path.join(
-    os.homedir(), 'Documents', 'Ableton', 'User Library', 'Remote Scripts', 'AbletonOSC', 'abletonosc', 'clip.py'
+// User Library の既定の場所は Windows が ~/Documents/Ableton、Mac が ~/Music/Ableton
+const defaultClipPyPath = (platform = process.platform) => path.join(
+    os.homedir(), platform === 'darwin' ? 'Music' : 'Documents',
+    'Ableton', 'User Library', 'Remote Scripts', 'AbletonOSC', 'abletonosc', 'clip.py'
 );
 
 /** `methods = [` から最初の `]` までを探す */
