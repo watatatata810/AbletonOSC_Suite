@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/suite-launcher/extensions/*"
   ],
   "scripts": {
     "start": "npm-run-all --parallel start:router start:viewWaves start:DaihonTrigger start:LtcSender",
